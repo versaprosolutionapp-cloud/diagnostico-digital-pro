@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagnóstico Digital Pro — VersaPro Solution TX</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #f3f4f6; min-height: 100vh; padding: 1rem; }
+input, textarea, button { font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState } = React;
+const NAVY = "#0B1F3A";
+const GOLD = "#C9A84C";
+const AREAS = [
+  { key: "web", label: "Página Web", icon: "🌐" },
+  { key: "gmaps", label: "Google Maps", icon: "📍" },
+  { key: "social", label: "Redes Sociales", icon: "📱" },
+  { key: "ads", label: "Google Ads", icon: "📢" },
+];
+const DEFAULT_PRICES = {
+  "Optimización SEO básica": 299,
+  "Rediseño o mejora visual web": 499,
+  "Configuración Google Business Profile": 199,
+  "Gestión de reseñas (1 mes)": 149,
+  "Setup redes sociales + bio": 149,
+  "Plan de contenido mensual": 299,
+  "Campaña Google Ads (setup)": 399,
+  "Mantenimiento digital mensual": 349,
+  "Sitio web completo (5 páginas)": 899,
+  "Redirección y configuración de dominio": 99,
+};
+const SYSTEM_B1 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+Usa web_search para investigar el sitio web y Google Business Profile del negocio.
+Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
+Detalles máximo 10 palabras cada uno.
+
+{"nombre":"","tipo":"","ciudad":"","url_encontrada":"url o No encontrado","resumen":"2 oraciones cortas con datos reales",
+"scores_web":0,"scores_gmaps":0,
+"analisis_web":{"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"fortalezas":["f1","f2"]}
+Reglas: scores 0-100, status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 3 items. SOLO JSON.`;
+
+const SYSTEM_B2 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+Investiga redes sociales y competidores del MISMO NICHO. Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
+Detalles máximo 10 palabras.
+
+{"scores_social":0,"scores_ads":0,
+"social":[{"red":"Instagram","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""}],
+"items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"competidores":[{"nombre":"","zona":"","nicho":"","scores":{"web":0,"gmaps":0,"social":0},"resenas":"","fortaleza":"","debilidad":""}],
+"oportunidades":["o1","o2","o3"],
+"ads":{"conviene":true,"tipo":"Google Ads/Local Services Ads/No recomendado","objetivo":"Llamadas/Formularios/Visitas","kw":["kw1","kw2"],"presupuesto":"$X-$Y/mes","errores":["e1","e2"]},
+"plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
+"mensaje_cierre":"mensaje WhatsApp máximo 4 líneas"}
+Reglas: exactamente 3 competidores del MISMO nicho, plan máximo 4 pasos.
+servicio: "Optimización SEO básica"|"Rediseño o mejora visual web"|"Configuración Google Business Profile"|"Gestión de reseñas (1 mes)"|"Setup redes sociales + bio"|"Plan de contenido mensual"|"Campaña Google Ads (setup)"|"Mantenimiento digital mensual"|"Sitio web completo (5 páginas)"|"Redirección y configuración de dominio"
+SOLO JSON.`;
+
+const extractJSON = (raw) => {
+  const text = (raw.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("").replace(/```json/gi,"").replace(/```/g,"").trim();
+  const start = text.indexOf("{");
+  if (start===-1) throw new Error("No JSON encontrado");
+  let depth=0, end=-1;
+  for(let i=start;i<text.length;i++){
+    if(text[i]==="{") depth++;
+    else if(text[i]==="}"){depth--;if(depth===0){end=i;break;}}
+  }
+  if(end!==-1){try{return JSON.parse(text.slice(start,end+1));}catch(e){}}
+  let partial=end!==-1?text.slice(start,end+1):text.slice(start);
+  try{return JSON.parse(partial);}catch(e){
+    let ob=0,ob2=0,inS=false,esc=false;
+    for(let i=0;i<partial.length;i++){
+      const ch=partial[i];
+      if(esc){esc=false;continue;}
+      if(ch==='\\'&&inS){esc=true;continue;}
+      if(ch==='"'){inS=!inS;continue;}
+      if(inS)continue;
+      if(ch==='{')ob++;else if(ch==='}')ob--;else if(ch==='[')ob2++;else if(ch===']')ob2--;
+    }
+    let fixed=partial.replace(/,\s*$/,'').replace(/,\s*([}\]])/g,'$1');
+    if(inS)fixed+='"';
+    fixed+=']'.repeat(Math.max(0,ob2))+'}' .repeat(Math.max(0,ob));
+    try{return JSON.parse(fixed);}catch(e2){throw new Error("JSON incompleto. Intenta de nuevo.");}
+  }
+};
+
+const callAPI = async (system, userMsg) => {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, userMsg }),
+  });
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error.message);
+  return extractJSON(raw);
+};
+
+function App() {
+  const [step, setStep] = useState("intake");
+  const [negocio, setNegocio] = useState("");
+  const [notas, setNotas] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadMsg, setLoadMsg] = useState("");
+  const [b1, setB1] = useState(null);
+  const [b2, setB2] = useState(null);
+  const [error, setError] = useState(null);
+  const [view, setView] = useState("cliente");
+  const [tab, setTab] = useState("resumen");
+  const [prices, setPrices] = useState({...DEFAULT_PRICES});
+  const [editingPrices, setEditingPrices] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const inp = { width:"100%", padding:"10px 12px", borderRadius:8, border:"1px solid #d1d5db", background:"#f9fafb", color:"#111827", fontSize:14, outline:"none" };
+
+  const analyze = async () => {
+    if (!negocio.trim()) return;
+    setLoading(true); setError(null); setB1(null); setB2(null);
+    const base = `Negocio: ${negocio}\nNotas: ${notas||"Sin notas"}`;
+    try {
+      setLoadMsg("🔍 Analizando web y Google Maps...");
+      const d1 = await callAPI(SYSTEM_B1, base, apiKey);
+      setB1(d1);
+      setLoadMsg("📱 Analizando redes y competidores...");
+      const d2 = await callAPI(SYSTEM_B2, `${base}\nNombre: ${d1.nombre}, Ciudad: ${d1.ciudad}, URL: ${d1.url_encontrada}`, apiKey);
+      setB2(d2);
+      setStep("report");
+    } catch(e) { setError("Error: "+e.message); }
+    setLoading(false);
+  };
+
+  const sc = s => s>=70?"#2E7D32":s>=40?"#E65100":"#C62828";
+  const stC = { critico:"#C62828", mejorable:"#E65100", bien:"#2E7D32" };
+  const stL = { critico:"🔴 Crítico", mejorable:"🟡 Mejorable", bien:"🟢 Bien" };
+  const tgC = v => ["Rápido","Bueno","Optimizado","Completo","Claro","Profesional","Correctas","Muchas","Sí","Alta","Activo","Completa"].includes(v)?"#2E7D32":["Medio","Regular","Parcial","Básica","Pocas","Media","Semanal","Incompletas"].includes(v)?"#E65100":"#C62828";
+
+  const SB = ({score,small}) => React.createElement('div',{style:{display:"flex",alignItems:"center",gap:6}},
+    !small&&React.createElement('span',{style:{fontSize:13,fontWeight:700,color:sc(score),minWidth:30}},score),
+    React.createElement('div',{style:{flex:1,height:small?4:7,background:"#e0e0e0",borderRadius:4}},
+      React.createElement('div',{style:{height:"100%",width:`${score}%`,background:sc(score),borderRadius:4}})),
+    small&&React.createElement('span',{style:{fontSize:10,color:sc(score),minWidth:20}},score)
+  );
+
+  const Tag = ({valor}) => React.createElement('span',{style:{fontSize:11,fontWeight:500,color:tgC(valor),background:tgC(valor)+"18",padding:"2px 10px",borderRadius:10,whiteSpace:"nowrap"}},valor);
+
+  const IL = ({items}) => React.createElement('div',null,(items||[]).map((it,i)=>
+    React.createElement('div',{key:i,style:{borderLeft:`3px solid ${stC[it.status]||"#999"}`,paddingLeft:12,marginBottom:12}},
+      React.createElement('span',{style:{fontSize:11,color:stC[it.status],fontWeight:500}},stL[it.status]),
+      React.createElement('p',{style:{fontWeight:500,fontSize:13,margin:"2px 0",color:"#111827"}},it.titulo),
+      React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},it.detalle)
+    )
+  ));
+
+  const card = (children,extra={}) => React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,...extra}},children);
+  const scores = {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,social:b2?.scores_social??0,ads:b2?.scores_ads??0};
+  const totalPlan = b2?.plan?.reduce((acc,p)=>acc+(prices[p.servicio]||0),0)||0;
+
+
+
+  // INTAKE
+  if (step==="intake") return React.createElement('div',{style:{maxWidth:680,margin:"0 auto",padding:"1rem"}},
+    React.createElement('div',{style:{background:NAVY,borderRadius:12,padding:"1.25rem 1.5rem",marginBottom:20,display:"flex",alignItems:"center",gap:14}},
+      React.createElement('div',{style:{width:46,height:46,borderRadius:8,background:GOLD,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}},"🔍"),
+      React.createElement('div',null,
+        React.createElement('p',{style:{color:GOLD,fontWeight:700,fontSize:16,margin:0}},"Diagnóstico Digital Pro"),
+        React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:0}},"VersaPro Solution TX · Herramienta de campo")
+      )
+    ),
+    card(React.createElement('div',null,
+      React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Nombre del negocio, URL o ambos *"),
+      React.createElement('input',{value:negocio,onChange:e=>setNegocio(e.target.value),placeholder:"Ej: Mao's Bakery, Houston TX  —  o  —  www.maosbakery.com",style:{...inp,marginBottom:16}}),
+      React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Notas de campo ",React.createElement('span',{style:{color:"#9ca3af"}},"(opcional)")),
+      React.createElement('textarea',{value:notas,onChange:e=>setNotas(e.target.value),rows:3,placeholder:"Ej: Local bien presentado, atienden en español, clientes por referidos...",style:{...inp,resize:"vertical"}}),
+      React.createElement('div',{style:{marginTop:12,padding:"10px 14px",background:"#eff6ff",borderRadius:8,borderLeft:"3px solid #2563eb"}},
+        React.createElement('p',{style:{fontSize:12,color:"#2563eb",margin:0}},"💡 Análisis en 2 pasos: web + Google Maps, luego redes + competidores.")
+      ),
+      error&&React.createElement('div',{style:{marginTop:10,padding:"10px 14px",background:"#fef2f2",borderRadius:8,border:"1px solid #fecaca"}},
+        React.createElement('p',{style:{color:"#dc2626",fontSize:13,margin:0}},error)),
+      React.createElement('button',{onClick:analyze,disabled:loading||!negocio.trim(),
+        style:{marginTop:14,width:"100%",padding:"13px 0",borderRadius:8,border:"none",background:loading||!negocio.trim()?"#9ca3af":NAVY,color:GOLD,fontWeight:700,fontSize:15,cursor:loading||!negocio.trim()?"not-allowed":"pointer"}},
+        loading?"⏳ Analizando...":"🚀 Generar diagnóstico completo"),
+      loading&&React.createElement('div',{style:{marginTop:14,padding:"14px 16px",background:"#f9fafb",borderRadius:8,border:"1px solid #e5e7eb"}},
+        React.createElement('div',{style:{display:"flex",alignItems:"center",gap:10,marginBottom:10}},
+          React.createElement('div',{style:{width:8,height:8,borderRadius:"50%",background:GOLD}}),
+          React.createElement('p',{style:{fontSize:13,color:"#6b7280",margin:0}},loadMsg)
+        ),
+        React.createElement('div',{style:{display:"flex",gap:8}},
+          ["🌐 Web + Google","📱 Redes + Competidores"].map((l,i)=>
+            React.createElement('div',{key:i,style:{flex:1,padding:"6px 10px",borderRadius:6,background:i===0&&b1?"#f0fdf4":"#f3f4f6",textAlign:"center"}},
+              React.createElement('p',{style:{fontSize:11,margin:0,color:i===0&&b1?"#16a34a":"#9ca3af"}},(i===0&&b1?"✓ ":"")+l)
+            )
+          )
+        )
+      )
+    )),
+    React.createElement('p',{style:{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:8}},"VersaPro Solution TX LLC · Diagnóstico Digital Pro · Powered by Claude AI")
+  );
+
+  if (!b1||!b2) return null;
+
+  // REPORTE
+  const tabs = [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]];
+
+  return React.createElement('div',{style:{maxWidth:680,margin:"0 auto",padding:"1rem"}},
+    React.createElement('div',{style:{background:NAVY,borderRadius:12,padding:"1rem 1.25rem",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      React.createElement('div',null,
+        React.createElement('p',{style:{color:GOLD,fontWeight:700,fontSize:15,margin:0}},b1.nombre),
+        React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:"2px 0 0"}},`${b1.tipo} · ${b1.ciudad}`)
+      ),
+      React.createElement('button',{onClick:()=>{setStep("intake");setB1(null);setB2(null);setNegocio("");setNotas("");},
+        style:{background:"transparent",border:"1px solid #8FA8C8",color:"#8FA8C8",borderRadius:6,padding:"4px 12px",fontSize:12,cursor:"pointer"}},"Nuevo")
+    ),
+
+    React.createElement('div',{style:{display:"flex",gap:8,marginBottom:14}},
+      [["cliente","📊 Cliente"],["consultor","🔧 Consultor"]].map(([v,l])=>
+        React.createElement('button',{key:v,onClick:()=>setView(v),
+          style:{flex:1,padding:"10px 0",borderRadius:8,fontWeight:600,fontSize:14,cursor:"pointer",border:view===v?`2px solid ${GOLD}`:"1px solid #e5e7eb",background:view===v?NAVY:"#f9fafb",color:view===v?GOLD:"#6b7280"}},l)
+      )
+    ),
+
+    view==="cliente"&&React.createElement('div',null,
+      React.createElement('div',{style:{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:4}},
+        tabs.map(([t,l])=>React.createElement('button',{key:t,onClick:()=>setTab(t),
+          style:{whiteSpace:"nowrap",padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:500,cursor:"pointer",border:tab===t?`1.5px solid ${GOLD}`:"1px solid #e5e7eb",background:tab===t?NAVY:"#f9fafb",color:tab===t?GOLD:"#6b7280"}},l))
+      ),
+
+      tab==="resumen"&&React.createElement('div',null,
+        card(React.createElement('p',{style:{fontSize:13,color:"#374151",lineHeight:1.7,margin:0}},b1.resumen),{background:"#f9fafb"}),
+        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
+          AREAS.map(a=>card(React.createElement('div',null,
+            React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+              React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},`${a.icon} ${a.label}`),
+              React.createElement('p',{style:{fontSize:20,fontWeight:700,color:sc(scores[a.key]),margin:0}},scores[a.key])
+            ),
+            React.createElement(SB,{score:scores[a.key]})
+          ),{key:a.key,marginBottom:0}))
+        ),
+        b1.fortalezas?.length>0&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 10px"}},"✅ Fortalezas"),
+          b1.fortalezas.map((f,i)=>React.createElement('p',{key:i,style:{fontSize:13,margin:"0 0 8px",paddingLeft:12,borderLeft:"3px solid #16a34a",lineHeight:1.5,color:"#374151"}},f))
+        ))
+      ),
+
+      tab==="web"&&b1.analisis_web&&React.createElement('div',null,
+        card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 4px"}},"🌐 Sitio Web"),
+          React.createElement('p',{style:{fontSize:12,color:"#9ca3af",margin:"0 0 14px"}},b1.analisis_web.url),
+          [["Mensaje",b1.analisis_web.mensaje_principal],["Diseño",b1.analisis_web.diseno],["Velocidad",b1.analisis_web.velocidad],["Contacto",b1.analisis_web.contacto],["SEO",b1.analisis_web.seo],["Mobile",b1.analisis_web.mobile]].map(([lbl,obj],i,arr)=>obj&&
+            React.createElement('div',{key:lbl,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none"}},
+              React.createElement('div',{style:{flex:1,paddingRight:10}},
+                React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 2px"}},lbl),
+                obj.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0}},obj.d)
+              ),
+              React.createElement(Tag,{valor:obj.v})
+            )
+          )
+        )),
+        b1.analisis_web.kw?.length>0&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 10px"}},"🔑 Palabras clave"),
+          React.createElement('div',{style:{display:"flex",flexWrap:"wrap",gap:8}},
+            b1.analisis_web.kw.map((kw,i)=>React.createElement('span',{key:i,style:{fontSize:12,background:NAVY+"12",color:NAVY,padding:"4px 12px",borderRadius:20,fontWeight:500}},kw))
+          )
+        )),
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas web"),React.createElement(IL,{items:b1.items_web})))
+      ),
+
+      tab==="gmaps"&&b1.analisis_gmaps&&React.createElement('div',null,
+        card(React.createElement('div',null,
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+            React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"📍 Google Business Profile"),
+            React.createElement('span',{style:{fontSize:12,padding:"3px 10px",borderRadius:10,background:b1.analisis_gmaps.encontrado?"#f0fdf4":"#fef2f2",color:b1.analisis_gmaps.encontrado?"#16a34a":"#dc2626",fontWeight:500}},
+              b1.analisis_gmaps.encontrado?"✓ Encontrado":"✗ No encontrado")
+          ),
+          [["Nombre",{v:b1.analisis_gmaps.nombre_perfil,d:""}],["Categorías",b1.analisis_gmaps.categorias],["Contacto",b1.analisis_gmaps.contacto],["Fotos",b1.analisis_gmaps.fotos],["Descripción",b1.analisis_gmaps.descripcion],["Publicaciones",b1.analisis_gmaps.publicaciones]].map(([lbl,obj],i)=>obj&&
+            React.createElement('div',{key:lbl,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #f3f4f6"}},
+              React.createElement('div',{style:{flex:1,paddingRight:10}},
+                React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 2px"}},lbl),
+                obj.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0}},obj.d)
+              ),
+              React.createElement(Tag,{valor:obj.v})
+            )
+          ),
+          b1.analisis_gmaps.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
+            React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 6px"}},"Reseñas"),
+            React.createElement('div',{style:{display:"flex",gap:16}},
+              React.createElement('span',{style:{fontSize:13}},`⭐ ${b1.analisis_gmaps.resenas.promedio}`),
+              React.createElement('span',{style:{fontSize:13,color:"#6b7280"}},`${b1.analisis_gmaps.resenas.cantidad} reseñas`),
+              React.createElement('span',{style:{fontSize:13,color:"#6b7280"}},`Respondidas: ${b1.analisis_gmaps.resenas.respondidas}`)
+            )
+          )
+        )),
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Google Maps"),React.createElement(IL,{items:b1.items_gmaps})))
+      ),
+
+      tab==="social"&&React.createElement('div',null,
+        b2.social?.map((p,i)=>card(React.createElement('div',null,
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+            React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},`📱 ${p.red}`),
+            React.createElement('span',{style:{fontSize:12,color:"#9ca3af"}},p.handle)
+          ),
+          React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+            [["Seguidores",p.seguidores],["Frecuencia",p.frecuencia],["Calidad",p.calidad]].map(([l,v])=>
+              React.createElement('div',{key:l,style:{background:"#f9fafb",borderRadius:8,padding:8}},
+                React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},l),
+                React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},v)
+              )
+            )
+          ),
+          p.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"10px 0 0",lineHeight:1.5}},p.d)
+        ),{key:i})),
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en redes"),React.createElement(IL,{items:b2.items_social})))
+      ),
+
+      tab==="competidores"&&React.createElement('div',null,
+        card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 14px"}},"🏆 Competidores del mismo nicho"),
+          b2.competidores?.map((c,i)=>React.createElement('div',{key:i,style:{marginBottom:18,paddingBottom:18,borderBottom:i<b2.competidores.length-1?"1px solid #f3f4f6":"none"}},
+            React.createElement('div',{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},
+              React.createElement('div',null,
+                React.createElement('p',{style:{fontWeight:600,fontSize:13,margin:0}},c.nombre),
+                React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"2px 0 0"}},`${c.zona} · ${c.nicho}`)
+              ),
+              React.createElement('span',{style:{fontSize:11,color:"#9ca3af"}},`📝 ${c.resenas}`)
+            ),
+            React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}},
+              ["web","gmaps","social"].map(k=>React.createElement('div',{key:k,style:{background:"#f9fafb",borderRadius:6,padding:"6px 8px"}},
+                React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},k),
+                React.createElement(SB,{score:c.scores?.[k]??0,small:true})
+              ))
+            ),
+            React.createElement('p',{style:{fontSize:12,color:"#16a34a",margin:"0 0 3px"}},`✅ ${c.fortaleza}`),
+            React.createElement('p',{style:{fontSize:12,color:"#dc2626",margin:0}},`⚠️ ${c.debilidad}`)
+          ))
+        )),
+        b2.oportunidades?.length>0&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 10px"}},"💡 Oportunidades"),
+          b2.oportunidades.map((o,i)=>React.createElement('p',{key:i,style:{fontSize:13,margin:"0 0 8px",paddingLeft:12,borderLeft:`3px solid ${GOLD}`,lineHeight:1.5,color:"#374151"}},o))
+        ),{border:`1px solid ${GOLD}50`})
+      )
+    ),
+
+    view==="consultor"&&React.createElement('div',null,
+      card(React.createElement('div',null,
+        React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 14px"}},"🗺️ Plan de ataque"),
+        b2.plan?.map((p,i)=>React.createElement('div',{key:i,style:{display:"flex",gap:12,marginBottom:16,alignItems:"flex-start"}},
+          React.createElement('div',{style:{minWidth:30,height:30,borderRadius:"50%",background:NAVY,color:GOLD,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,flexShrink:0}},p.paso),
+          React.createElement('div',{style:{flex:1}},
+            React.createElement('div',{style:{display:"flex",justifyContent:"space-between"}},
+              React.createElement('p',{style:{fontWeight:500,fontSize:13,margin:"0 0 3px"}},p.titulo),
+              React.createElement('span',{style:{fontSize:11,color:"#9ca3af",whiteSpace:"nowrap",marginLeft:8}},p.dias)
+            ),
+            React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 6px",lineHeight:1.5}},p.detalle),
+            p.servicio&&React.createElement('span',{style:{fontSize:11,background:"#eff6ff",color:"#2563eb",padding:"2px 10px",borderRadius:10}},p.servicio)
+          )
+        ))
+      )),
+
+      b2.ads&&card(React.createElement('div',null,
+        React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"📢 Google Ads"),
+          React.createElement('span',{style:{fontSize:12,padding:"3px 10px",borderRadius:10,background:b2.ads.conviene?"#f0fdf4":"#fffbeb",color:b2.ads.conviene?"#16a34a":"#d97706",fontWeight:500}},b2.ads.conviene?"✓ Recomendado":"⏳ Aún no")
+        ),
+        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+          [["Tipo",b2.ads.tipo],["Objetivo",b2.ads.objetivo],["Presupuesto",b2.ads.presupuesto]].map(([l,v])=>v&&
+            React.createElement('div',{key:l,style:{background:"#f9fafb",borderRadius:8,padding:"8px 10px"}},
+              React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 3px",textTransform:"uppercase"}},l),
+              React.createElement('p',{style:{fontSize:12,fontWeight:500,margin:0}},v)
+            )
+          )
+        ),
+        b2.ads.kw?.length>0&&React.createElement('div',{style:{marginBottom:8}},
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 6px"}},"Palabras clave:"),
+          React.createElement('div',{style:{display:"flex",flexWrap:"wrap",gap:6}},
+            b2.ads.kw.map((kw,i)=>React.createElement('span',{key:i,style:{fontSize:11,background:NAVY+"12",color:NAVY,padding:"3px 10px",borderRadius:20}},kw))
+          )
+        ),
+        b2.ads.errores?.length>0&&React.createElement('div',null,
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 4px"}},"⛔ Errores a evitar:"),
+          b2.ads.errores.map((e,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 3px",paddingLeft:12,color:"#dc2626"}},`• ${e}`))
+        )
+      )),
+
+      card(React.createElement('div',null,
+        React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"💲 Cotización estimada"),
+          React.createElement('button',{onClick:()=>setEditingPrices(!editingPrices),
+            style:{fontSize:12,padding:"4px 10px",borderRadius:6,border:"1px solid #e5e7eb",background:"#f9fafb",cursor:"pointer",color:"#6b7280"}},
+            editingPrices?"✓ Listo":"✏️ Editar precios")
+        ),
+        Object.entries(prices).map(([servicio,precio])=>{
+          const enPlan=b2.plan?.some(p=>p.servicio===servicio);
+          return React.createElement('div',{key:servicio,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6",opacity:enPlan?1:0.35}},
+            React.createElement('p',{style:{fontSize:12,margin:0,fontWeight:enPlan?500:400,color:enPlan?"#111827":"#9ca3af"}},(enPlan?"✓ ":"")+servicio),
+            editingPrices
+              ?React.createElement('input',{type:"number",value:precio,onChange:e=>setPrices(p=>({...p,[servicio]:Number(e.target.value)})),style:{width:70,textAlign:"right",padding:"3px 6px",borderRadius:6,border:"1px solid #e5e7eb",fontSize:12}})
+              :React.createElement('p',{style:{fontSize:13,fontWeight:enPlan?700:400,margin:0,color:enPlan?NAVY:"#9ca3af"}},`$${precio}`)
+          );
+        }),
+        React.createElement('div',{style:{display:"flex",justifyContent:"space-between",marginTop:12,paddingTop:10,borderTop:`2px solid ${GOLD}`}},
+          React.createElement('p',{style:{fontWeight:600,fontSize:15,margin:0}},"Total estimado"),
+          React.createElement('p',{style:{fontWeight:700,fontSize:20,color:NAVY,margin:0}},`$${totalPlan.toLocaleString()}`)
+        )
+      )),
+
+      card(React.createElement('div',null,
+        React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"💬 Mensaje WhatsApp"),
+          React.createElement('button',{onClick:()=>{navigator.clipboard.writeText(b2.mensaje_cierre||"");setCopied(true);setTimeout(()=>setCopied(false),2000);},
+            style:{fontSize:12,padding:"4px 10px",borderRadius:6,border:"1px solid #e5e7eb",background:copied?"#f0fdf4":"#f9fafb",cursor:"pointer",color:copied?"#16a34a":"#6b7280"}},
+            copied?"✓ Copiado":"Copiar")
+        ),
+        React.createElement('div',{style:{background:"#f0fdf4",borderRadius:8,padding:"12px 14px"}},
+          React.createElement('p',{style:{fontSize:13,lineHeight:1.8,margin:0,color:"#14532d",whiteSpace:"pre-wrap"}},b2.mensaje_cierre)
+        )
+      ))
+    ),
+
+    React.createElement('p',{style:{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:16}},
+      "VersaPro Solution TX LLC · Diagnóstico Digital Pro · Powered by Claude AI")
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
