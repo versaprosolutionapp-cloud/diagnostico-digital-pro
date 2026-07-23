@@ -16,7 +16,7 @@ input, textarea, button { font-family: inherit; }
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState } = React;
+const { useState, useEffect } = React;
 const NAVY = "#0B1F3A";
 const GOLD = "#C9A84C";
 const AREAS = [
@@ -37,6 +37,57 @@ const DEFAULT_PRICES = {
   "Sitio web completo (5 páginas)": 899,
   "Redirección y configuración de dominio": 99,
 };
+const REALTOR_AREAS = [
+  { key: "web", label: "Página Web", icon: "🌐" },
+  { key: "gmaps", label: "Google Business", icon: "📍" },
+  { key: "zillow", label: "Zillow/Realtor.com", icon: "🏠" },
+  { key: "social", label: "Redes + WhatsApp", icon: "📱" },
+];
+const REALTOR_DEFAULT_PRICES = {
+  "Diagnóstico + Kit Realtor": 299,
+  "Página web para agente": 349,
+  "Configuración WhatsApp Business": 99,
+  "Setup Instagram/Facebook + bio": 149,
+  "Plan de contenido mensual (redes)": 249,
+  "Gestión de reseñas (1 mes)": 149,
+  "Optimización Google Business + Zillow": 199,
+  "Guía de video (grabación + edición)": 99,
+  "Mantenimiento digital mensual": 249,
+};
+const SYSTEM_R1 = `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
+Usa web_search para investigar el sitio web, Google Business Profile, Zillow y Realtor.com del AGENTE (no de la agencia/brokerage).
+Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
+Detalles máximo 10 palabras cada uno.
+
+{"nombre":"","tipo":"Realtor","ciudad":"","estado":"Texas o Florida","brokerage":"","url_encontrada":"url o No encontrado","resumen":"2 oraciones cortas con datos reales",
+"scores_web":0,"scores_gmaps":0,"scores_zillow":0,
+"analisis_web":{"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_zillow":{"encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"v":"Completo/Parcial/Ausente","d":""}},
+"items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"items_zillow":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"fortalezas":["f1","f2"]}
+Reglas: scores 0-100, status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 2 items cada categoría.
+La página web DEBE evaluarse por cumplimiento: Texas requiere aviso TREC (IABS/Consumer Protection Notice) y afiliación al broker visible; Florida requiere nombre del brokerage visible (FREC/DBPR). Refleja esto en el detalle de "contacto" o "seo" de analisis_web. SOLO JSON.`;
+
+const SYSTEM_R2 = `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
+Investiga WhatsApp Business, Instagram, Facebook y realtors competidores del MISMO mercado/zona. Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
+Detalles máximo 10 palabras.
+
+{"scores_social":0,
+"social":[{"red":"WhatsApp Business","handle":"","seguidores":"Con catálogo/Sin catálogo","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""},{"red":"Facebook","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""}],
+"items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"competidores":[{"nombre":"","zona":"","nicho":"Realtor","scores":{"web":0,"gmaps":0,"zillow":0,"social":0},"resenas":"","fortaleza":"","debilidad":""}],
+"referente_top":{"nombre":"","ciudad":"","por_que":"1 oración: qué hace bien en digital que es alcanzable"},
+"oportunidades":["o1","o2","o3"],
+"plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
+"mensaje_cierre":"mensaje WhatsApp máximo 4 líneas"}
+Reglas: exactamente 2-3 competidores realtors de la MISMA zona/mercado (agentes reales que aparezcan en Google Maps/Zillow de esa área), plan máximo 4 pasos.
+referente_top: un realtor hispano exitoso y reconocido en Texas o Florida (no necesariamente de la misma zona) como modelo aspiracional de presencia digital.
+servicio: "Diagnóstico + Kit Realtor"|"Página web para agente"|"Configuración WhatsApp Business"|"Setup Instagram/Facebook + bio"|"Plan de contenido mensual (redes)"|"Gestión de reseñas (1 mes)"|"Optimización Google Business + Zillow"|"Guía de video (grabación + edición)"|"Mantenimiento digital mensual"
+SOLO JSON.`;
+
 const SYSTEM_B1 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
 Usa web_search para investigar el sitio web y Google Business Profile del negocio.
 Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
@@ -108,6 +159,8 @@ const callAPI = async (system, userMsg) => {
 
 function App() {
   const [step, setStep] = useState("intake");
+  const [tipo, setTipo] = useState("negocio");
+  const [estadoUbic, setEstadoUbic] = useState("Texas");
   const [negocio, setNegocio] = useState("");
   const [notas, setNotas] = useState("");
   const [loading, setLoading] = useState(false);
@@ -121,18 +174,25 @@ function App() {
   const [editingPrices, setEditingPrices] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  useEffect(() => {
+    if (step === "intake") setPrices(tipo === "realtor" ? {...REALTOR_DEFAULT_PRICES} : {...DEFAULT_PRICES});
+  }, [tipo]);
+
   const inp = { width:"100%", padding:"10px 12px", borderRadius:8, border:"1px solid #d1d5db", background:"#f9fafb", color:"#111827", fontSize:14, outline:"none" };
 
   const analyze = async () => {
     if (!negocio.trim()) return;
     setLoading(true); setError(null); setB1(null); setB2(null);
-    const base = `Negocio: ${negocio}\nNotas: ${notas||"Sin notas"}`;
+    const isRealtor = tipo === "realtor";
+    const base = isRealtor
+      ? `Agente: ${negocio}\nEstado: ${estadoUbic}\nNotas: ${notas||"Sin notas"}`
+      : `Negocio: ${negocio}\nNotas: ${notas||"Sin notas"}`;
     try {
-      setLoadMsg("🔍 Analizando web y Google Maps...");
-      const d1 = await callAPI(SYSTEM_B1, base);
+      setLoadMsg(isRealtor ? "🔍 Analizando web, Google Business y Zillow..." : "🔍 Analizando web y Google Maps...");
+      const d1 = await callAPI(isRealtor ? SYSTEM_R1 : SYSTEM_B1, base);
       setB1(d1);
-      setLoadMsg("📱 Analizando redes y competidores...");
-      const d2 = await callAPI(SYSTEM_B2, `${base}\nNombre: ${d1.nombre}, Ciudad: ${d1.ciudad}, URL: ${d1.url_encontrada}`);
+      setLoadMsg(isRealtor ? "📱 Analizando redes, WhatsApp y competidores..." : "📱 Analizando redes y competidores...");
+      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\nNombre: ${d1.nombre}, Ciudad: ${d1.ciudad}, URL: ${d1.url_encontrada}`);
       setB2(d2);
       setStep("report");
     } catch(e) { setError("Error: "+e.message); }
@@ -162,7 +222,9 @@ function App() {
   ));
 
   const card = (children,extra={}) => React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,...extra}},children);
-  const scores = {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,social:b2?.scores_social??0,ads:b2?.scores_ads??0};
+  const scores = tipo==="realtor"
+    ? {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,zillow:b1?.scores_zillow??0,social:b2?.scores_social??0}
+    : {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,social:b2?.scores_social??0,ads:b2?.scores_ads??0};
   const totalPlan = b2?.plan?.reduce((acc,p)=>acc+(prices[p.servicio]||0),0)||0;
 
   if (step==="intake") return React.createElement('div',{style:{maxWidth:680,margin:"0 auto"}},
@@ -174,12 +236,26 @@ function App() {
       )
     ),
     card(React.createElement('div',null,
-      React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Nombre del negocio, URL o ambos *"),
-      React.createElement('input',{value:negocio,onChange:e=>setNegocio(e.target.value),placeholder:"Ej: Mao's Bakery, Houston TX  —  o  —  www.maosbakery.com",style:{...inp,marginBottom:16}}),
+      React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:6,fontWeight:500}},"Tipo de diagnóstico *"),
+      React.createElement('div',{style:{display:"flex",gap:8,marginBottom:16}},
+        [["negocio","🏪 Pequeño Negocio"],["realtor","🏠 Realtor"]].map(([v,l])=>
+          React.createElement('button',{key:v,onClick:()=>setTipo(v),
+            style:{flex:1,padding:"10px 0",borderRadius:8,fontWeight:600,fontSize:13,cursor:"pointer",border:tipo===v?`2px solid ${GOLD}`:"1px solid #e5e7eb",background:tipo===v?NAVY:"#f9fafb",color:tipo===v?GOLD:"#6b7280"}},l)
+        )
+      ),
+      tipo==="realtor"&&React.createElement('div',{style:{marginBottom:16}},
+        React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Estado"),
+        React.createElement('div',{style:{display:"flex",gap:8}},
+          ["Texas","Florida"].map(e=>React.createElement('button',{key:e,onClick:()=>setEstadoUbic(e),
+            style:{flex:1,padding:"8px 0",borderRadius:8,fontWeight:500,fontSize:13,cursor:"pointer",border:estadoUbic===e?`1.5px solid ${NAVY}`:"1px solid #e5e7eb",background:estadoUbic===e?"#eff6ff":"#f9fafb",color:estadoUbic===e?NAVY:"#6b7280"}},e))
+        )
+      ),
+      React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},tipo==="realtor"?"Nombre del agente + zona/ciudad *":"Nombre del negocio, URL o ambos *"),
+      React.createElement('input',{value:negocio,onChange:e=>setNegocio(e.target.value),placeholder:tipo==="realtor"?"Ej: María López, Realtor en Kissimmee FL":"Ej: Mao's Bakery, Houston TX  —  o  —  www.maosbakery.com",style:{...inp,marginBottom:16}}),
       React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Notas de campo ",React.createElement('span',{style:{color:"#9ca3af"}},"(opcional)")),
       React.createElement('textarea',{value:notas,onChange:e=>setNotas(e.target.value),rows:3,placeholder:"Ej: Local bien presentado, atienden en español, clientes por referidos...",style:{...inp,resize:"vertical"}}),
       React.createElement('div',{style:{marginTop:12,padding:"10px 14px",background:"#eff6ff",borderRadius:8,borderLeft:"3px solid #2563eb"}},
-        React.createElement('p',{style:{fontSize:12,color:"#2563eb",margin:0}},"💡 Análisis en 2 pasos: web + Google Maps, luego redes + competidores.")
+        React.createElement('p',{style:{fontSize:12,color:"#2563eb",margin:0}},tipo==="realtor"?"💡 Análisis en 2 pasos: web + Google Business + Zillow, luego redes + WhatsApp + competidores.":"💡 Análisis en 2 pasos: web + Google Maps, luego redes + competidores.")
       ),
       error&&React.createElement('div',{style:{marginTop:10,padding:"10px 14px",background:"#fef2f2",borderRadius:8,border:"1px solid #fecaca"}},
         React.createElement('p',{style:{color:"#dc2626",fontSize:13,margin:0}},error)),
@@ -192,7 +268,7 @@ function App() {
           React.createElement('p',{style:{fontSize:13,color:"#6b7280",margin:0}},loadMsg)
         ),
         React.createElement('div',{style:{display:"flex",gap:8}},
-          ["🌐 Web + Google","📱 Redes + Competidores"].map((l,i)=>
+          (tipo==="realtor"?["🌐 Web + Google + Zillow","📱 Redes + WhatsApp + Competencia"]:["🌐 Web + Google","📱 Redes + Competidores"]).map((l,i)=>
             React.createElement('div',{key:i,style:{flex:1,padding:"6px 10px",borderRadius:6,background:i===0&&b1?"#f0fdf4":"#f3f4f6",textAlign:"center"}},
               React.createElement('p',{style:{fontSize:11,margin:0,color:i===0&&b1?"#16a34a":"#9ca3af"}},(i===0&&b1?"✓ ":"")+l)
             )
@@ -205,7 +281,9 @@ function App() {
 
   if (!b1||!b2) return null;
 
-  const tabs = [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]];
+  const tabs = tipo==="realtor"
+    ? [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["zillow","🏠 Zillow"],["social","📱 Redes"],["competidores","🏆 Competencia"]]
+    : [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]];
 
   return React.createElement('div',{style:{maxWidth:680,margin:"0 auto"}},
     React.createElement('div',{style:{background:NAVY,borderRadius:12,padding:"1rem 1.25rem",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -233,7 +311,7 @@ function App() {
       tab==="resumen"&&React.createElement('div',null,
         card(React.createElement('p',{style:{fontSize:13,color:"#374151",lineHeight:1.7,margin:0}},b1.resumen),{background:"#f9fafb"}),
         React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
-          AREAS.map(a=>card(React.createElement('div',null,
+          (tipo==="realtor"?REALTOR_AREAS:AREAS).map(a=>card(React.createElement('div',null,
             React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
               React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},`${a.icon} ${a.label}`),
               React.createElement('p',{style:{fontSize:20,fontWeight:700,color:sc(scores[a.key]),margin:0}},scores[a.key])
@@ -298,6 +376,33 @@ function App() {
         card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Google Maps"),React.createElement(IL,{items:b1.items_gmaps})))
       ),
 
+      tab==="zillow"&&b1.analisis_zillow&&React.createElement('div',null,
+        card(React.createElement('div',null,
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+            React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"🏠 Zillow / Realtor.com"),
+            React.createElement('span',{style:{fontSize:12,padding:"3px 10px",borderRadius:10,background:b1.analisis_zillow.encontrado?"#f0fdf4":"#fef2f2",color:b1.analisis_zillow.encontrado?"#16a34a":"#dc2626",fontWeight:500}},
+              b1.analisis_zillow.encontrado?"✓ Encontrado":"✗ No encontrado")
+          ),
+          [["Nombre",{v:b1.analisis_zillow.nombre_perfil,d:""}],["Perfil reclamado",b1.analisis_zillow.perfil_reclamado],["Ventas pasadas",b1.analisis_zillow.ventas_pasadas],["Listings activos",b1.analisis_zillow.listings_activos],["Realtor.com",b1.analisis_zillow.realtor_com]].map(([lbl,obj])=>obj&&(obj.v||obj.d)&&
+            React.createElement('div',{key:lbl,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #f3f4f6"}},
+              React.createElement('div',{style:{flex:1,paddingRight:10}},
+                React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 2px"}},lbl),
+                obj.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0}},obj.d)
+              ),
+              obj.v&&React.createElement(Tag,{valor:obj.v})
+            )
+          ),
+          b1.analisis_zillow.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
+            React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 6px"}},"Reseñas Zillow"),
+            React.createElement('div',{style:{display:"flex",gap:16}},
+              React.createElement('span',{style:{fontSize:13}},`⭐ ${b1.analisis_zillow.resenas.promedio}`),
+              React.createElement('span',{style:{fontSize:13,color:"#6b7280"}},`${b1.analisis_zillow.resenas.cantidad} reseñas`)
+            )
+          )
+        )),
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Zillow/Realtor.com"),React.createElement(IL,{items:b1.items_zillow})))
+      ),
+
       tab==="social"&&React.createElement('div',null,
         b2.social?.map((p,i)=>card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
@@ -305,7 +410,7 @@ function App() {
             React.createElement('span',{style:{fontSize:12,color:"#9ca3af"}},p.handle)
           ),
           React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
-            [["Seguidores",p.seguidores],["Frecuencia",p.frecuencia],["Calidad",p.calidad]].map(([l,v])=>
+            (p.red==="WhatsApp Business"?[["Catálogo",p.seguidores],["Respuesta",p.frecuencia],["Calidad",p.calidad]]:[["Seguidores",p.seguidores],["Frecuencia",p.frecuencia],["Calidad",p.calidad]]).map(([l,v])=>
               React.createElement('div',{key:l,style:{background:"#f9fafb",borderRadius:8,padding:8}},
                 React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},l),
                 React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},v)
@@ -318,8 +423,13 @@ function App() {
       ),
 
       tab==="competidores"&&React.createElement('div',null,
+        b2.referente_top&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 8px"}},"⭐ Referente a alcanzar"),
+          React.createElement('p',{style:{fontWeight:600,fontSize:14,margin:"0 0 2px",color:NAVY}},`${b2.referente_top.nombre}${b2.referente_top.ciudad?" · "+b2.referente_top.ciudad:""}`),
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},b2.referente_top.por_que)
+        ),{border:`1.5px solid ${GOLD}`,background:GOLD+"0d"}),
         card(React.createElement('div',null,
-          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 14px"}},"🏆 Competidores del mismo nicho"),
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 14px"}},tipo==="realtor"?"🏆 Realtors de tu zona":"🏆 Competidores del mismo nicho"),
           b2.competidores?.map((c,i)=>React.createElement('div',{key:i,style:{marginBottom:18,paddingBottom:18,borderBottom:i<b2.competidores.length-1?"1px solid #f3f4f6":"none"}},
             React.createElement('div',{style:{display:"flex",justifyContent:"space-between",marginBottom:6}},
               React.createElement('div',null,
@@ -328,8 +438,8 @@ function App() {
               ),
               React.createElement('span',{style:{fontSize:11,color:"#9ca3af"}},`📝 ${c.resenas}`)
             ),
-            React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}},
-              ["web","gmaps","social"].map(k=>React.createElement('div',{key:k,style:{background:"#f9fafb",borderRadius:6,padding:"6px 8px"}},
+            React.createElement('div',{style:{display:"grid",gridTemplateColumns:tipo==="realtor"?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:6,marginBottom:8}},
+              (tipo==="realtor"?["web","gmaps","zillow","social"]:["web","gmaps","social"]).map(k=>React.createElement('div',{key:k,style:{background:"#f9fafb",borderRadius:6,padding:"6px 8px"}},
                 React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},k),
                 React.createElement(SB,{score:c.scores?.[k]??0,small:true})
               ))
