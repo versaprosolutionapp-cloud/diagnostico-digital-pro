@@ -41,6 +41,7 @@ const REALTOR_AREAS = [
   { key: "web", label: "Página Web", icon: "🌐" },
   { key: "gmaps", label: "Google Business", icon: "📍" },
   { key: "zillow", label: "Zillow/Realtor.com", icon: "🏠" },
+  { key: "directorios", label: "Homes/MapQuest/Yelp", icon: "📌" },
   { key: "social", label: "Redes + WhatsApp", icon: "📱" },
 ];
 const REALTOR_DEFAULT_PRICES = {
@@ -60,13 +61,15 @@ Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin ba
 Detalles máximo 10 palabras cada uno.
 
 {"nombre":"","tipo":"Realtor","ciudad":"","estado":"Texas o Florida","brokerage":"","url_encontrada":"url o No encontrado","resumen":"2 oraciones cortas con datos reales",
-"scores_web":0,"scores_gmaps":0,"scores_zillow":0,
+"scores_web":0,"scores_gmaps":0,"scores_zillow":0,"scores_directorios":0,
 "analisis_web":{"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
 "analisis_gmaps":{"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
 "analisis_zillow":{"encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"v":"Completo/Parcial/Ausente","d":""}},
+"analisis_directorios":{"homes_com":{"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_zillow":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
+"items_directorios":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "fortalezas":["f1","f2"]}
 Reglas: scores 0-100, status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 2 items cada categoría.
 La página web DEBE evaluarse por cumplimiento: Texas requiere aviso TREC (IABS/Consumer Protection Notice) y afiliación al broker visible; Florida requiere nombre del brokerage visible (FREC/DBPR). Refleja esto en el detalle de "contacto" o "seo" de analisis_web. SOLO JSON.`;
@@ -76,7 +79,7 @@ Investiga WhatsApp Business, Instagram, Facebook y realtors competidores del MIS
 Detalles máximo 10 palabras.
 
 {"scores_social":0,
-"social":[{"red":"WhatsApp Business","handle":"","seguidores":"Con catálogo/Sin catálogo","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""},{"red":"Facebook","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""}],
+"social":[{"red":"WhatsApp Business","handle":"","seguidores":"Con catálogo/Sin catálogo","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""},{"red":"Facebook","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""},{"red":"TikTok","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "competidores":[{"nombre":"","zona":"","nicho":"Realtor","scores":{"web":0,"gmaps":0,"zillow":0,"social":0},"resenas":"","fortaleza":"","debilidad":""}],
 "referente_top":{"nombre":"","ciudad":"","por_que":"1 oración: qué hace bien en digital que es alcanzable"},
@@ -223,7 +226,7 @@ function App() {
 
   const card = (children,extra={}) => React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,...extra}},children);
   const scores = tipo==="realtor"
-    ? {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,zillow:b1?.scores_zillow??0,social:b2?.scores_social??0}
+    ? {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,zillow:b1?.scores_zillow??0,directorios:b1?.scores_directorios??0,social:b2?.scores_social??0}
     : {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,social:b2?.scores_social??0,ads:b2?.scores_ads??0};
   const totalPlan = b2?.plan?.reduce((acc,p)=>acc+(prices[p.servicio]||0),0)||0;
 
@@ -282,7 +285,7 @@ function App() {
   if (!b1||!b2) return null;
 
   const tabs = tipo==="realtor"
-    ? [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["zillow","🏠 Zillow"],["social","📱 Redes"],["competidores","🏆 Competencia"]]
+    ? [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["zillow","🏠 Zillow"],["directorios","📌 Directorios"],["social","📱 Redes"],["competidores","🏆 Competencia"]]
     : [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]];
 
   return React.createElement('div',{style:{maxWidth:680,margin:"0 auto"}},
@@ -401,6 +404,26 @@ function App() {
           )
         )),
         card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Zillow/Realtor.com"),React.createElement(IL,{items:b1.items_zillow})))
+      ),
+
+      tab==="directorios"&&b1.analisis_directorios&&React.createElement('div',null,
+        card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 14px"}},"📌 Homes.com, MapQuest y Yelp"),
+          [["Homes.com",b1.analisis_directorios.homes_com],["MapQuest",b1.analisis_directorios.mapquest],["Yelp",b1.analisis_directorios.yelp]].map(([lbl,d])=>d&&
+            React.createElement('div',{key:lbl,style:{padding:"10px 0",borderBottom:"1px solid #f3f4f6"}},
+              React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+                React.createElement('p',{style:{fontSize:13,fontWeight:600,margin:0}},lbl),
+                React.createElement('span',{style:{fontSize:11,padding:"2px 8px",borderRadius:10,background:d.encontrado?"#f0fdf4":"#fef2f2",color:d.encontrado?"#16a34a":"#dc2626",fontWeight:500}},d.encontrado?"✓ Encontrado":"✗ No encontrado")
+              ),
+              d.completitud&&React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                d.completitud.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,flex:1}},d.completitud.d),
+                React.createElement(Tag,{valor:d.completitud.v})
+              ),
+              d.resenas&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"4px 0 0"}},`⭐ ${d.resenas.promedio} · ${d.resenas.cantidad} reseñas`)
+            )
+          )
+        )),
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en directorios"),React.createElement(IL,{items:b1.items_directorios})))
       ),
 
       tab==="social"&&React.createElement('div',null,
