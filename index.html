@@ -7,6 +7,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, -apple-system, sans-serif; background: #f3f4f6; min-height: 100vh; padding: 1rem; }
@@ -16,7 +17,7 @@ input, textarea, button { font-family: inherit; }
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 const NAVY = "#0B1F3A";
 const GOLD = "#C9A84C";
 const AREAS = [
@@ -176,6 +177,9 @@ function App() {
   const [prices, setPrices] = useState({...DEFAULT_PRICES});
   const [editingPrices, setEditingPrices] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [generatingImg, setGeneratingImg] = useState(false);
+  const shareRef = useRef(null);
 
   useEffect(() => {
     if (step === "intake") setPrices(tipo === "realtor" ? {...REALTOR_DEFAULT_PRICES} : {...DEFAULT_PRICES});
@@ -284,6 +288,26 @@ function App() {
 
   if (!b1||!b2) return null;
 
+  const descargarImagen = () => {
+    if (!shareRef.current || !window.html2canvas) return;
+    setGeneratingImg(true);
+    window.html2canvas(shareRef.current, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
+      const link = document.createElement('a');
+      link.download = `Diagnostico-${(b1.nombre||"cliente").replace(/\s+/g,'-')}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      setGeneratingImg(false);
+    }).catch(() => setGeneratingImg(false));
+  };
+
+  const avgScore = Math.round(Object.values(scores).reduce((a,c)=>a+c,0) / Math.max(1,Object.values(scores).length));
+  const semaforo = avgScore>=70?{e:"🟢",t:"Presencia sólida"}:avgScore>=40?{e:"🟡",t:"En construcción"}:{e:"🔴",t:"Presencia crítica"};
+  const itemsAll = [...(b1.items_web||[]),...(b1.items_gmaps||[]),...(tipo==="realtor"?[...(b1.items_zillow||[]),...(b1.items_directorios||[])]:[]),...(b2.items_social||[])];
+  const topHuecos = itemsAll.filter(i=>i.status==="critico").concat(itemsAll.filter(i=>i.status==="mejorable")).slice(0,3);
+  const topFortalezas = (b1.fortalezas||[]).slice(0,3);
+  const competidorTop = b2.competidores?.[0];
+  const serviciosKit = (b2.plan||[]).slice(0,3).map(p=>p.titulo);
+
   const tabs = tipo==="realtor"
     ? [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["zillow","🏠 Zillow"],["directorios","📌 Directorios"],["social","📱 Redes"],["competidores","🏆 Competencia"]]
     : [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]];
@@ -302,7 +326,9 @@ function App() {
       [["cliente","📊 Cliente"],["consultor","🔧 Consultor"]].map(([v,l])=>
         React.createElement('button',{key:v,onClick:()=>setView(v),
           style:{flex:1,padding:"10px 0",borderRadius:8,fontWeight:600,fontSize:14,cursor:"pointer",border:view===v?`2px solid ${GOLD}`:"1px solid #e5e7eb",background:view===v?NAVY:"#f9fafb",color:view===v?GOLD:"#6b7280"}},l)
-      )
+      ),
+      React.createElement('button',{onClick:()=>setShowShare(true),
+        style:{padding:"10px 14px",borderRadius:8,fontWeight:600,fontSize:14,cursor:"pointer",border:"none",background:GOLD,color:NAVY,whiteSpace:"nowrap"}},"📤 Compartir")
     ),
 
     view==="cliente"&&React.createElement('div',null,
@@ -555,7 +581,57 @@ function App() {
     ),
 
     React.createElement('p',{style:{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:16}},
-      "VersaPro Solution TX LLC · Diagnóstico Digital Pro · Powered by Claude AI")
+      "VersaPro Solution TX LLC · Diagnóstico Digital Pro · Powered by Claude AI"),
+
+    showShare && React.createElement('div',{style:{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"flex-start",justifyContent:"center",overflowY:"auto",padding:"20px 12px",zIndex:1000}},
+      React.createElement('div',{style:{background:"#fff",borderRadius:14,padding:16,maxWidth:400,width:"100%"}},
+        React.createElement('div',{ref:shareRef,style:{width:360,background:"#ffffff",fontFamily:"system-ui, -apple-system, sans-serif",overflow:"hidden",border:"1px solid #e5e7eb",borderRadius:12}},
+          React.createElement('div',{style:{background:NAVY,padding:"18px 20px"}},
+            React.createElement('p',{style:{color:GOLD,fontWeight:800,fontSize:15,margin:0}},"VersaPro Solution TX"),
+            React.createElement('p',{style:{color:"#8FA8C8",fontSize:11,margin:"2px 0 0"}},"Diagnóstico Digital")
+          ),
+          React.createElement('div',{style:{padding:"18px 20px 6px"}},
+            React.createElement('p',{style:{fontWeight:700,fontSize:16,margin:0,color:"#111827"}},b1.nombre),
+            React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"2px 0 14px"}},tipo==="realtor"?`${b1.estado||estadoUbic} · ${b1.ciudad}`:b1.ciudad)
+          ),
+          React.createElement('div',{style:{display:"flex",alignItems:"center",gap:14,padding:"0 20px 16px"}},
+            React.createElement('div',{style:{width:64,height:64,borderRadius:"50%",background:"#f9fafb",border:`4px solid ${sc(avgScore)}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},
+              React.createElement('span',{style:{fontWeight:800,fontSize:18,color:sc(avgScore)}},avgScore)
+            ),
+            React.createElement('div',null,
+              React.createElement('p',{style:{margin:0,fontSize:13,fontWeight:700,color:sc(avgScore)}},`${semaforo.e} ${semaforo.t}`),
+              React.createElement('p',{style:{margin:"2px 0 0",fontSize:11,color:"#9ca3af"}},"Puntuación digital general")
+            )
+          ),
+          topFortalezas.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#16a34a"}},"✅ Lo que ya haces bien"),
+            topFortalezas.map((f,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 4px",color:"#374151",lineHeight:1.4}},`• ${f}`))
+          ),
+          topHuecos.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#dc2626"}},"⚠️ Te está costando clientes"),
+            topHuecos.map((h,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 4px",color:"#374151",lineHeight:1.4}},`• ${h.titulo}`))
+          ),
+          competidorTop&&React.createElement('div',{style:{margin:"0 20px 14px",padding:"10px 12px",background:"#fffbeb",borderRadius:8,borderLeft:`3px solid ${GOLD}`}},
+            React.createElement('p',{style:{fontSize:11,fontWeight:700,margin:"0 0 3px",color:"#92400e"}},"📌 Con quién compites"),
+            React.createElement('p',{style:{fontSize:12,margin:0,color:"#78350f",lineHeight:1.4}},`${competidorTop.nombre} (${competidorTop.zona}): ${competidorTop.fortaleza}`)
+          ),
+          serviciosKit.length>0&&React.createElement('div',{style:{padding:"0 20px 16px"}},
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:NAVY}},"🚀 Por dónde empezamos"),
+            serviciosKit.map((s,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 4px",color:"#374151",lineHeight:1.4}},`${i+1}. ${s}`))
+          ),
+          React.createElement('div',{style:{background:GOLD+"22",padding:"12px 20px",textAlign:"center"}},
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:0,color:NAVY}},"📲 Escríbeme y armamos tu plan de 30 días")
+          )
+        ),
+        React.createElement('div',{style:{display:"flex",gap:8,marginTop:14}},
+          React.createElement('button',{onClick:descargarImagen,disabled:generatingImg,
+            style:{flex:1,padding:"11px 0",borderRadius:8,border:"none",background:NAVY,color:GOLD,fontWeight:700,fontSize:13,cursor:generatingImg?"not-allowed":"pointer"}},
+            generatingImg?"⏳ Generando...":"⬇️ Descargar imagen"),
+          React.createElement('button',{onClick:()=>setShowShare(false),
+            style:{padding:"11px 16px",borderRadius:8,border:"1px solid #e5e7eb",background:"#f9fafb",color:"#6b7280",fontWeight:600,fontSize:13,cursor:"pointer"}},"Cerrar")
+        )
+      )
+    )
   );
 }
 
