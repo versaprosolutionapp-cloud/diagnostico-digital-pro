@@ -23,7 +23,7 @@ const ADVERTENCIA = "Esta revisión muestra señales iniciales. VersaPro verific
 const NO_LOCALIZADO = "No localizado durante la revisión inicial";
 
 const CANALES = [
-  { key: "web", label: "Página Web", icon: "🌐" },
+  { key: "web", label: "Presencia web", icon: "🌐" },
   { key: "gsearch", label: "Google Search", icon: "🔎" },
   { key: "gbp", label: "Google Business Profile", icon: "🏷️" },
   { key: "gmaps", label: "Google Maps", icon: "📍" },
@@ -41,6 +41,11 @@ Detalles máximo 12 palabras cada uno. Sé MUY conciso.
 "gsearch":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"qué aparece al buscar el negocio en Google Search","fuente":"","requiere_revision":true},
 "gbp":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"estado de la ficha Google Business Profile","fuente":"","requiere_revision":true},
 "gmaps":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"presencia del negocio en Google Maps","fuente":"","requiere_revision":true}},
+"presencia_web":{
+"har":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"perfil público en HAR.com","fuente":"","requiere_revision":true},
+"broker":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"página del agente dentro del sitio del broker","fuente":"","requiere_revision":true},
+"directorios":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"directorios localizados (Zillow, Realtor.com, Yelp u otros)","fuente":"","requiere_revision":true},
+"sitio_propio":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"sitio web personal propio con dominio del agente o negocio","fuente":"","requiere_revision":true}},
 "resenas":{"cantidad":0,"promedio":"0.0","fuente":"","evidencia":"confirmado/probable/no_verificado"},
 "hallazgos_web":[{"tipo":"fortaleza","titulo":"","detalle":"","evidencia":"confirmado","confianza":"alto","fuente":"URL o dónde se observó","requiere_revision":false}],
 "hallazgos_gsearch":[],
@@ -49,6 +54,7 @@ Detalles máximo 12 palabras cada uno. Sé MUY conciso.
 
 Reglas OBLIGATORIAS:
 - Trata Google Search, Google Business Profile y Google Maps como TRES canales SEPARADOS: un negocio puede aparecer en uno y no en otro.
+- Dentro de presencia_web distingue CUATRO elementos SEPARADOS: perfil en HAR.com, página dentro del sitio del broker, directorios localizados y sitio web personal propio. NO confundas un perfil de HAR o del broker con un sitio web propio. Si alguno no aplica al tipo de negocio, usa estado "${NO_LOCALIZADO}" con requiere_revision true.
 - Incluye ÚNICAMENTE hallazgos respaldados por evidencia observada. NO existe un mínimo: las listas de hallazgos pueden quedar vacías [].
 - Cada hallazgo lleva: tipo (fortaleza|debilidad), evidencia (confirmado|probable|no_verificado), confianza (alto|medio|bajo), fuente y requiere_revision (true|false).
 - NUNCA concluyas que una web, ficha o plataforma NO EXISTE solo porque no apareció en la primera búsqueda. En ese caso usa "${NO_LOCALIZADO}", evidencia "no_verificado" y requiere_revision true.
@@ -254,7 +260,7 @@ function App() {
   };
 
   const allHallazgos = [
-    ...((b1?.hallazgos_web) || []).map(h => ({ ...h, canal: "Página Web" })),
+    ...((b1?.hallazgos_web) || []).map(h => ({ ...h, canal: "Presencia web" })),
     ...((b1?.hallazgos_gsearch) || []).map(h => ({ ...h, canal: "Google Search" })),
     ...((b1?.hallazgos_gbp) || []).map(h => ({ ...h, canal: "Google Business Profile" })),
     ...((b1?.hallazgos_gmaps) || []).map(h => ({ ...h, canal: "Google Maps" })),
@@ -359,7 +365,7 @@ function App() {
       {view === "cliente" && (
         <div>
           <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
-            {[["resumen","📋 Resumen"],["web","🌐 Web"],["google","🔎 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]].map(([t,l]) => (
+            {[["resumen","📋 Resumen"],["web","🌐 Presencia web"],["google","🔎 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]].map(([t,l]) => (
               <button key={t} onClick={() => setTab(t)}
                 style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: "pointer", border: tab === t ? `1.5px solid ${GOLD}` : "1px solid #e5e7eb", background: tab === t ? NAVY : "#f9fafb", color: tab === t ? GOLD : "#6b7280" }}>
                 {l}
@@ -392,7 +398,11 @@ function App() {
 
           {tab === "web" && (
             <div>
-              <CanalCard titulo="Página Web" icon="🌐" canal={canales.web} />
+              <CanalCard titulo="Presencia web (general)" icon="🌐" canal={canales.web} />
+              <CanalCard titulo="Perfil HAR" icon="🏘️" canal={b1.presencia_web?.har} />
+              <CanalCard titulo="Sitio del broker" icon="🏢" canal={b1.presencia_web?.broker} />
+              <CanalCard titulo="Directorios localizados" icon="📂" canal={b1.presencia_web?.directorios} />
+              <CanalCard titulo="Sitio web personal propio" icon="💻" canal={b1.presencia_web?.sitio_propio} />
               <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
                 <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>Señales observadas en la web</p>
                 <HallazgoList items={b1.hallazgos_web} />
