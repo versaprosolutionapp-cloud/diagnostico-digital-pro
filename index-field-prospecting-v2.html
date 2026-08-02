@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VersaPro Field Prospecting — Diagnóstico preliminar de campo</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body { margin: 0; background: #F7F6F3; padding: 0 14px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+const NAVY = "#0B1F3A";
+const GOLD = "#C9A84C";
+
+const ADVERTENCIA = "Esta revisión muestra señales iniciales. VersaPro verificará la información y enviará las posibles correcciones dentro de aproximadamente 48 horas.";
+const NO_LOCALIZADO = "No localizado durante la revisión inicial";
+
+const CANALES = [
+  { key: "web", label: "Presencia web", icon: "🌐" },
+  { key: "gsearch", label: "Google Search", icon: "🔎" },
+  { key: "gbp", label: "Google Business Profile", icon: "🏷️" },
+  { key: "gmaps", label: "Google Maps", icon: "📍" },
+  { key: "social", label: "Redes Sociales", icon: "📱" },
+];
+
+const SYSTEM_B1 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+Realiza una REVISIÓN PRELIMINAR DE CAMPO (no una auditoría definitiva). Usa web_search para observar el sitio web y la presencia en Google del negocio.
+Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
+Detalles máximo 12 palabras cada uno. Sé MUY conciso.
+
+{"nombre":"","tipo":"","ciudad":"","url_encontrada":"url o ${NO_LOCALIZADO}","resumen":"2 oraciones prudentes basadas SOLO en lo observado",
+"canales":{
+"web":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"","fuente":"","requiere_revision":true},
+"gsearch":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"qué aparece al buscar el negocio en Google Search","fuente":"","requiere_revision":true},
+"gbp":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"estado de la ficha Google Business Profile","fuente":"","requiere_revision":true},
+"gmaps":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"presencia del negocio en Google Maps","fuente":"","requiere_revision":true}},
+"presencia_web":{
+"har":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"perfil público en HAR.com","fuente":"","requiere_revision":true},
+"broker":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"página del agente dentro del sitio del broker","fuente":"","requiere_revision":true},
+"directorios":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"directorios localizados (Zillow, Realtor.com, Yelp u otros)","fuente":"","requiere_revision":true},
+"sitio_propio":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"sitio web personal propio con dominio del agente o negocio","fuente":"","requiere_revision":true}},
+"resenas":{"cantidad":0,"promedio":"0.0","fuente":"","evidencia":"confirmado/probable/no_verificado"},
+"hallazgos_web":[{"tipo":"fortaleza","titulo":"","detalle":"","evidencia":"confirmado","confianza":"alto","fuente":"URL o dónde se observó","requiere_revision":false}],
+"hallazgos_gsearch":[],
+"hallazgos_gbp":[],
+"hallazgos_gmaps":[]}
+
+Reglas OBLIGATORIAS:
+- Trata Google Search, Google Business Profile y Google Maps como TRES canales SEPARADOS: un negocio puede aparecer en uno y no en otro.
+- Dentro de presencia_web distingue CUATRO elementos SEPARADOS: perfil en HAR.com, página dentro del sitio del broker, directorios localizados y sitio web personal propio. NO confundas un perfil de HAR o del broker con un sitio web propio. Si alguno no aplica al tipo de negocio, usa estado "${NO_LOCALIZADO}" con requiere_revision true.
+- Incluye ÚNICAMENTE hallazgos respaldados por evidencia observada. NO existe un mínimo: las listas de hallazgos pueden quedar vacías [].
+- Cada hallazgo lleva: tipo (fortaleza|debilidad), evidencia (confirmado|probable|no_verificado), confianza (alto|medio|bajo), fuente y requiere_revision (true|false).
+- NUNCA concluyas que una web, ficha o plataforma NO EXISTE solo porque no apareció en la primera búsqueda. En ese caso usa "${NO_LOCALIZADO}", evidencia "no_verificado" y requiere_revision true.
+- Si no localizaste reseñas, usa "resenas":null.
+- No inventes datos, cifras, nombres ni URLs. Si no lo observaste, no lo afirmes.
+- SOLO JSON. SIN texto antes o después del JSON.`;
+
+const SYSTEM_B2 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+Realiza una REVISIÓN PRELIMINAR DE CAMPO (no una auditoría definitiva) de redes sociales y competidores del mismo nicho, usando web_search.
+Responde SOLO con JSON compacto y válido. Sin markdown. Sin backticks. Sin texto extra.
+Detalles máximo 12 palabras. Sé MUY conciso.
+
+{"canal_social":{"estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","d":"","fuente":"","requiere_revision":true},
+"social":[{"red":"Instagram","handle":"","estado":"Localizado/Requiere verificación/${NO_LOCALIZADO}","frecuencia":"","d":"","evidencia":"confirmado/probable/no_verificado","confianza":"alto/medio/bajo","fuente":"","requiere_revision":false}],
+"hallazgos_social":[{"tipo":"fortaleza/debilidad","titulo":"","detalle":"","evidencia":"confirmado/probable/no_verificado","confianza":"alto/medio/bajo","fuente":"","requiere_revision":false}],
+"competidores":[{"nombre":"","zona":"","nicho":"","resenas":"","fortaleza_visible":"","posible_debilidad":"","fuente":"","evidencia":"confirmado/probable/no_verificado","requiere_revision":false}],
+"sintesis":{
+"fortalezas_visibles":[{"texto":"","fuente":"","confianza":"alto/medio/bajo"}],
+"posibles_debilidades":[{"texto":"","fuente":"","confianza":"alto/medio/bajo"}],
+"no_verificados":["elemento que no pudo confirmarse en esta revisión"],
+"plataformas_pendientes":["plataforma que requiere investigación posterior"],
+"proximo_paso":"acción concreta que VersaPro realizará en la verificación"},
+"mensaje_cierre":"mensaje WhatsApp máximo 4 líneas: agradece la visita, menciona 1-2 señales observadas y avisa que VersaPro verificará la información y enviará las posibles correcciones en aproximadamente 48 horas"}
+
+Reglas OBLIGATORIAS:
+- Incluye ÚNICAMENTE hallazgos y competidores respaldados por evidencia observada. NO existe un mínimo: las listas pueden quedar vacías [].
+- Competidores: entre 0 y 3, del MISMO nicho, SOLO si los observaste realmente; incluye la fuente.
+- NUNCA concluyas que una red social o plataforma NO EXISTE solo porque no apareció en la primera búsqueda. Usa "${NO_LOCALIZADO}", evidencia "no_verificado" y requiere_revision true; agrégala a plataformas_pendientes.
+- NO incluyas Google Ads, presupuestos, palabras clave, puntuaciones ni cotizaciones: esto es un diagnóstico preliminar de campo.
+- No inventes datos, cifras, seguidores ni URLs.
+- SOLO JSON. SIN texto antes o después del JSON.`;
+
+const extractJSON = (raw) => {
+  const text = (raw.content || [])
+    .filter(b => b.type === "text")
+    .map(b => b.text)
+    .join("")
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  const start = text.indexOf("{");
+  if (start === -1) throw new Error("No se encontró JSON en la respuesta");
+
+  let depth = 0, end = -1;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+
+  if (end !== -1) {
+    try { return JSON.parse(text.slice(start, end + 1)); } catch (e) {}
+  }
+
+  let partial = end !== -1 ? text.slice(start, end + 1) : text.slice(start);
+  try { return JSON.parse(partial); } catch(e) {
+    let openBraces = 0, openBrackets = 0, inString = false, escaped = false;
+    for (let i = 0; i < partial.length; i++) {
+      const ch = partial[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\' && inString) { escaped = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '{') openBraces++;
+      else if (ch === '}') openBraces--;
+      else if (ch === '[') openBrackets++;
+      else if (ch === ']') openBrackets--;
+    }
+    let fixed = partial.replace(/,\s*$/, '').replace(/,\s*([}\]])/g, '$1');
+    if (inString) fixed += '"';
+    fixed += ']'.repeat(Math.max(0, openBrackets)) + '}'.repeat(Math.max(0, openBraces));
+    try { return JSON.parse(fixed); } catch(e2) {
+      throw new Error("JSON incompleto. Por favor intenta de nuevo.");
+    }
+  }
+};
+
+const callAPI = async (system, userMsg) => {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, userMsg }),
+  });
+  const raw = await res.json();
+  if (raw.error) throw new Error(typeof raw.error === "string" ? raw.error : raw.error.message);
+  return extractJSON(raw);
+};
+
+const fechaEntrega = () => {
+  const d = new Date(Date.now() + 48 * 3600 * 1000);
+  return d.toLocaleDateString("es-US", { weekday: "long", day: "numeric", month: "long" });
+};
+
+function App() {
+  const [step, setStep] = useState("intake");
+  const [negocio, setNegocio] = useState("");
+  const [notas, setNotas] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadMsg, setLoadMsg] = useState("");
+  const [b1, setB1] = useState(null);
+  const [b2, setB2] = useState(null);
+  const [error, setError] = useState(null);
+  const [view, setView] = useState("cliente");
+  const [tab, setTab] = useState("resumen");
+  const [copied, setCopied] = useState(false);
+
+  const analyze = async () => {
+    if (!negocio.trim()) return;
+    setLoading(true); setError(null); setB1(null); setB2(null);
+    const base = `Negocio: ${negocio}\nNotas de campo: ${notas || "Sin notas"}`;
+    try {
+      setLoadMsg("🔍 Revisión inicial: web y presencia en Google...");
+      const d1 = await callAPI(SYSTEM_B1, base);
+      setB1(d1);
+      setLoadMsg("📱 Revisión inicial: redes sociales y competidores...");
+      const d2 = await callAPI(SYSTEM_B2, `${base}\n\nDatos ya observados:\nNombre: ${d1.nombre}, Ciudad: ${d1.ciudad}, URL: ${d1.url_encontrada}`);
+      setB2(d2);
+      setStep("report");
+    } catch (e) {
+      setError("Error: " + e.message);
+    }
+    setLoading(false);
+  };
+
+  const evColor = { confirmado: "#2E7D32", probable: "#E65100", no_verificado: "#6b7280" };
+  const evLabel = { confirmado: "Confirmado", probable: "Probable", no_verificado: "No verificado" };
+  const confColor = { alto: "#2E7D32", medio: "#E65100", bajo: "#C62828" };
+  const estadoColor = v => {
+    if (!v) return "#6b7280";
+    if (v.startsWith("Localizado")) return "#2E7D32";
+    if (v.startsWith("Requiere")) return "#E65100";
+    return "#6b7280";
+  };
+
+  const EstadoTag = ({ valor }) => (
+    <span style={{ fontSize: 11, fontWeight: 500, color: estadoColor(valor), background: estadoColor(valor) + "18", padding: "2px 10px", borderRadius: 10 }}>{valor}</span>
+  );
+
+  const EvBadge = ({ ev }) => ev ? (
+    <span style={{ fontSize: 10, fontWeight: 600, color: evColor[ev] || "#6b7280", background: (evColor[ev] || "#6b7280") + "18", padding: "1px 8px", borderRadius: 8, textTransform: "uppercase", letterSpacing: ".03em" }}>{evLabel[ev] || ev}</span>
+  ) : null;
+
+  const MetaLine = ({ h }) => (
+    <p style={{ fontSize: 11, color: "#9ca3af", margin: "5px 0 0", lineHeight: 1.5 }}>
+      {h.confianza && <span>Confianza: <b style={{ color: confColor[h.confianza] || "#6b7280" }}>{h.confianza}</b> · </span>}
+      {h.fuente && <span>Fuente: {h.fuente} · </span>}
+      <span>Requiere revisión: {h.requiere_revision ? "sí" : "no"}</span>
+    </p>
+  );
+
+  const HallazgoList = ({ items, showMeta }) => {
+    if (!items || items.length === 0) return (
+      <p style={{ fontSize: 12, color: "#9ca3af", margin: 0, fontStyle: "italic" }}>Sin hallazgos con evidencia suficiente en esta revisión inicial.</p>
+    );
+    return (
+      <div>
+        {items.map((h, i) => (
+          <div key={i} style={{ borderLeft: `3px solid ${h.tipo === "fortaleza" ? "#2E7D32" : "#E65100"}`, paddingLeft: 12, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontWeight: 500, color: h.tipo === "fortaleza" ? "#2E7D32" : "#E65100" }}>{h.tipo === "fortaleza" ? "✅ Fortaleza visible" : "⚠️ Posible debilidad"}</span>
+              <EvBadge ev={h.evidencia} />
+            </div>
+            <p style={{ fontWeight: 500, fontSize: 13, margin: "2px 0", color: "#111827" }}>{h.titulo}</p>
+            <p style={{ fontSize: 12, color: "#6b7280", margin: 0, lineHeight: 1.5 }}>{h.detalle}</p>
+            {showMeta && <MetaLine h={h} />}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const Advertencia = ({ compact }) => (
+    <div style={{ background: "#FEF9EC", border: "1px solid #F5E3B3", borderLeft: `4px solid ${GOLD}`, borderRadius: 10, padding: compact ? "10px 14px" : "12px 16px", marginBottom: 14 }}>
+      <p style={{ fontSize: compact ? 12 : 13, color: "#633806", margin: 0, lineHeight: 1.6 }}>⚠️ {ADVERTENCIA}</p>
+    </div>
+  );
+
+  const CanalCard = ({ titulo, icon, canal, showMeta }) => canal && (
+    <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
+        <p style={{ fontWeight: 500, fontSize: 14, margin: 0, color: "#111827" }}>{icon} {titulo}</p>
+        <EstadoTag valor={canal.estado} />
+      </div>
+      {canal.d && <p style={{ fontSize: 12, color: "#6b7280", margin: 0, lineHeight: 1.5 }}>{canal.d}</p>}
+      {showMeta && (
+        <p style={{ fontSize: 11, color: "#9ca3af", margin: "5px 0 0" }}>
+          {canal.fuente && <span>Fuente: {canal.fuente} · </span>}
+          <span>Requiere revisión: {canal.requiere_revision ? "sí" : "no"}</span>
+        </p>
+      )}
+    </div>
+  );
+
+  const canales = {
+    web: b1?.canales?.web,
+    gsearch: b1?.canales?.gsearch,
+    gbp: b1?.canales?.gbp,
+    gmaps: b1?.canales?.gmaps,
+    social: b2?.canal_social,
+  };
+
+  const allHallazgos = [
+    ...((b1?.hallazgos_web) || []).map(h => ({ ...h, canal: "Presencia web" })),
+    ...((b1?.hallazgos_gsearch) || []).map(h => ({ ...h, canal: "Google Search" })),
+    ...((b1?.hallazgos_gbp) || []).map(h => ({ ...h, canal: "Google Business Profile" })),
+    ...((b1?.hallazgos_gmaps) || []).map(h => ({ ...h, canal: "Google Maps" })),
+    ...((b2?.hallazgos_social) || []).map(h => ({ ...h, canal: "Redes Sociales" })),
+  ];
+  const pendientes = allHallazgos.filter(h => h.requiere_revision || h.evidencia === "no_verificado");
+
+  const webNoLocalizada = !b1?.url_encontrada || b1.url_encontrada.startsWith("No localizado");
+
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 8,
+    border: "1px solid #d1d5db", background: "#f9fafb", color: "#111827",
+    fontSize: 14, fontFamily: "system-ui, sans-serif", outline: "none"
+  };
+
+  if (step === "intake") return (
+    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 680, margin: "0 auto", padding: "1.5rem 0" }}>
+      <div style={{ background: NAVY, borderRadius: 12, padding: "1.25rem 1.5rem", marginBottom: 20, display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ width: 46, height: 46, borderRadius: 8, background: GOLD, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🔍</div>
+        <div>
+          <p style={{ color: GOLD, fontWeight: 700, fontSize: 16, margin: 0 }}>VersaPro Field Prospecting</p>
+          <p style={{ color: "#8FA8C8", fontSize: 12, margin: 0 }}>VersaPro Solution TX · Diagnóstico preliminar de campo</p>
+        </div>
+      </div>
+
+      <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1.5rem" }}>
+        <label style={{ fontSize: 12, color: "#6b7280", display: "block", marginBottom: 4, fontWeight: 500 }}>Nombre del negocio, URL o ambos *</label>
+        <input value={negocio} onChange={e => setNegocio(e.target.value)}
+          placeholder="Ej: Mao's Bakery, Houston TX  —  o  —  www.maosbakery.com"
+          style={{ ...inputStyle, marginBottom: 16 }} />
+
+        <label style={{ fontSize: 12, color: "#6b7280", display: "block", marginBottom: 4, fontWeight: 500 }}>Notas de campo <span style={{ color: "#9ca3af" }}>(opcional)</span></label>
+        <textarea value={notas} onChange={e => setNotas(e.target.value)}
+          placeholder="Ej: Local bien presentado, atienden en español, clientes por referidos, sin presencia online visible..."
+          rows={3} style={{ ...inputStyle, resize: "vertical" }} />
+
+        <div style={{ marginTop: 12, padding: "10px 14px", background: "#eff6ff", borderRadius: 8, borderLeft: "3px solid #2563eb" }}>
+          <p style={{ fontSize: 12, color: "#2563eb", margin: 0 }}>💡 Revisión preliminar en 2 pasos: web + presencia en Google, luego redes sociales + competidores.</p>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <Advertencia compact />
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 10, padding: "10px 14px", background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
+            <p style={{ color: "#dc2626", fontSize: 13, margin: 0 }}>{error}</p>
+          </div>
+        )}
+
+        <button onClick={analyze} disabled={loading || !negocio.trim()}
+          style={{ marginTop: 8, width: "100%", padding: "13px 0", borderRadius: 8, border: "none", background: loading || !negocio.trim() ? "#9ca3af" : NAVY, color: GOLD, fontWeight: 700, fontSize: 15, cursor: loading || !negocio.trim() ? "not-allowed" : "pointer" }}>
+          {loading ? "⏳ Analizando..." : "🚀 Generar diagnóstico preliminar de campo"}
+        </button>
+
+        {loading && (
+          <div style={{ marginTop: 14, padding: "14px 16px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: GOLD }} />
+              <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>{loadMsg}</p>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["🌐 Web + Google", "📱 Redes + Competidores"].map((l, i) => (
+                <div key={i} style={{ flex: 1, padding: "6px 10px", borderRadius: 6, background: (i === 0 && b1) ? "#f0fdf4" : "#f3f4f6", textAlign: "center" }}>
+                  <p style={{ fontSize: 11, margin: 0, color: (i === 0 && b1) ? "#16a34a" : "#9ca3af" }}>{(i === 0 && b1) ? "✓ " : ""}{l}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <p style={{ textAlign: "center", fontSize: 11, color: "#9ca3af", marginTop: 16 }}>VersaPro Solution TX LLC · Field Prospecting · Powered by Claude AI</p>
+    </div>
+  );
+
+  if (!b1 || !b2) return null;
+
+  return (
+    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 680, margin: "0 auto", padding: "1rem 0" }}>
+      <div style={{ background: NAVY, borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <p style={{ color: GOLD, fontWeight: 700, fontSize: 15, margin: 0 }}>{b1.nombre}</p>
+          <p style={{ color: "#8FA8C8", fontSize: 12, margin: "2px 0 0" }}>{b1.tipo} · {b1.ciudad} · {webNoLocalizada ? "🔎 Web no localizada aún" : b1.url_encontrada}</p>
+        </div>
+        <button onClick={() => { setStep("intake"); setB1(null); setB2(null); setNegocio(""); setNotas(""); setTab("resumen"); setView("cliente"); }}
+          style={{ background: "transparent", border: "1px solid #8FA8C8", color: "#8FA8C8", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>
+          Nuevo
+        </button>
+      </div>
+
+      <Advertencia />
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {[["cliente","📊 Vista Cliente"],["consultor","🔧 Vista Consultor"]].map(([v,l]) => (
+          <button key={v} onClick={() => setView(v)}
+            style={{ flex: 1, padding: "10px 0", borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: "pointer", border: view === v ? `2px solid ${GOLD}` : "1px solid #e5e7eb", background: view === v ? NAVY : "#f9fafb", color: view === v ? GOLD : "#6b7280" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {view === "cliente" && (
+        <div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
+            {[["resumen","📋 Resumen"],["web","🌐 Presencia web"],["google","🔎 Google"],["social","📱 Redes"],["competidores","🏆 Competencia"]].map(([t,l]) => (
+              <button key={t} onClick={() => setTab(t)}
+                style={{ whiteSpace: "nowrap", padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: "pointer", border: tab === t ? `1.5px solid ${GOLD}` : "1px solid #e5e7eb", background: tab === t ? NAVY : "#f9fafb", color: tab === t ? GOLD : "#6b7280" }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {tab === "resumen" && (
+            <div>
+              <div style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 12 }}>
+                <p style={{ fontSize: 11, color: "#9ca3af", margin: "0 0 6px", textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600 }}>Resultados preliminares</p>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.7, margin: 0 }}>{b1.resumen}</p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                {CANALES.map(c => canales[c.key] && (
+                  <div key={c.key} style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem" }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, margin: "0 0 8px", color: "#111827" }}>{c.icon} {c.label}</p>
+                    <EstadoTag valor={canales[c.key].estado} />
+                  </div>
+                ))}
+              </div>
+              {b2.sintesis?.fortalezas_visibles?.length > 0 && (
+                <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
+                  <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 10px", color: "#111827" }}>✅ Fortalezas visibles</p>
+                  {b2.sintesis.fortalezas_visibles.map((f, i) => <p key={i} style={{ fontSize: 13, margin: "0 0 8px", paddingLeft: 12, borderLeft: "3px solid #16a34a", lineHeight: 1.5, color: "#374151" }}>{f.texto}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "web" && (
+            <div>
+              <CanalCard titulo="Presencia web (general)" icon="🌐" canal={canales.web} />
+              <CanalCard titulo="Perfil HAR" icon="🏘️" canal={b1.presencia_web?.har} />
+              <CanalCard titulo="Sitio del broker" icon="🏢" canal={b1.presencia_web?.broker} />
+              <CanalCard titulo="Directorios localizados" icon="📂" canal={b1.presencia_web?.directorios} />
+              <CanalCard titulo="Sitio web personal propio" icon="💻" canal={b1.presencia_web?.sitio_propio} />
+              <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>Señales observadas en la web</p>
+                <HallazgoList items={b1.hallazgos_web} />
+              </div>
+            </div>
+          )}
+
+          {tab === "google" && (
+            <div>
+              <CanalCard titulo="Presencia en Google Search" icon="🔎" canal={canales.gsearch} />
+              <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 10 }}>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>Señales en Google Search</p>
+                <HallazgoList items={b1.hallazgos_gsearch} />
+              </div>
+
+              <CanalCard titulo="Google Business Profile" icon="🏷️" canal={canales.gbp} />
+              <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 10 }}>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>Señales en Google Business Profile</p>
+                <HallazgoList items={b1.hallazgos_gbp} />
+              </div>
+
+              <CanalCard titulo="Google Maps" icon="📍" canal={canales.gmaps} />
+              {b1.resenas && (
+                <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, margin: 0, color: "#111827" }}>Reseñas observadas</p>
+                    <EvBadge ev={b1.resenas.evidencia} />
+                  </div>
+                  <div style={{ display: "flex", gap: 16, marginTop: 6 }}>
+                    <span style={{ fontSize: 13 }}>⭐ {b1.resenas.promedio}</span>
+                    <span style={{ fontSize: 13, color: "#6b7280" }}>{b1.resenas.cantidad} reseñas</span>
+                  </div>
+                </div>
+              )}
+              <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>Señales en Google Maps</p>
+                <HallazgoList items={b1.hallazgos_gmaps} />
+              </div>
+            </div>
+          )}
+
+          {tab === "social" && (
+            <div>
+              <CanalCard titulo="Redes Sociales" icon="📱" canal={canales.social} />
+              {b2.social?.map((p, i) => (
+                <div key={i} style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+                    <p style={{ fontWeight: 500, fontSize: 14, margin: 0, color: "#111827" }}>📱 {p.red} <span style={{ fontSize: 12, color: "#9ca3af", fontWeight: 400 }}>{p.handle}</span></p>
+                    <EstadoTag valor={p.estado} />
+                  </div>
+                  {p.frecuencia && <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 4px" }}>Frecuencia observada: {p.frecuencia}</p>}
+                  {p.d && <p style={{ fontSize: 12, color: "#6b7280", margin: 0, lineHeight: 1.5 }}>{p.d}</p>}
+                </div>
+              ))}
+              <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>Señales en redes</p>
+                <HallazgoList items={b2.hallazgos_social} />
+              </div>
+            </div>
+          )}
+
+          {tab === "competidores" && (
+            <div>
+              <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
+                <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 14px", color: "#111827" }}>🏆 Competidores observados en la revisión inicial</p>
+                {(!b2.competidores || b2.competidores.length === 0) && (
+                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0, fontStyle: "italic" }}>No se observaron competidores con evidencia suficiente en esta revisión inicial.</p>
+                )}
+                {b2.competidores?.map((c, i) => (
+                  <div key={i} style={{ marginBottom: 18, paddingBottom: 18, borderBottom: i < b2.competidores.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
+                      <div>
+                        <p style={{ fontWeight: 600, fontSize: 13, margin: 0, color: "#111827" }}>{c.nombre}</p>
+                        <p style={{ fontSize: 11, color: "#9ca3af", margin: "2px 0 0" }}>{c.zona} · {c.nicho}</p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {c.resenas && <span style={{ fontSize: 11, color: "#9ca3af" }}>📝 {c.resenas} reseñas</span>}
+                        <EvBadge ev={c.evidencia} />
+                      </div>
+                    </div>
+                    {c.fortaleza_visible && <p style={{ fontSize: 12, color: "#16a34a", margin: "0 0 3px" }}>✅ {c.fortaleza_visible}</p>}
+                    {c.posible_debilidad && <p style={{ fontSize: 12, color: "#E65100", margin: 0 }}>⚠️ Posible debilidad: {c.posible_debilidad}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "consultor" && (
+        <div>
+          <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 12 }}>
+            <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 14px", color: "#111827" }}>🧭 Síntesis preliminar de campo</p>
+
+            {b2.sintesis?.fortalezas_visibles?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#2E7D32", margin: "0 0 6px" }}>✅ Fortalezas visibles</p>
+                {b2.sintesis.fortalezas_visibles.map((f, i) => (
+                  <div key={i} style={{ paddingLeft: 12, borderLeft: "3px solid #16a34a", marginBottom: 8 }}>
+                    <p style={{ fontSize: 13, margin: 0, color: "#374151", lineHeight: 1.5 }}>{f.texto}</p>
+                    <p style={{ fontSize: 11, color: "#9ca3af", margin: "2px 0 0" }}>
+                      {f.confianza && <span>Confianza: <b style={{ color: confColor[f.confianza] || "#6b7280" }}>{f.confianza}</b></span>}
+                      {f.fuente && <span> · Fuente: {f.fuente}</span>}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {b2.sintesis?.posibles_debilidades?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#E65100", margin: "0 0 6px" }}>⚠️ Posibles debilidades</p>
+                {b2.sintesis.posibles_debilidades.map((d, i) => (
+                  <div key={i} style={{ paddingLeft: 12, borderLeft: "3px solid #E65100", marginBottom: 8 }}>
+                    <p style={{ fontSize: 13, margin: 0, color: "#374151", lineHeight: 1.5 }}>{d.texto}</p>
+                    <p style={{ fontSize: 11, color: "#9ca3af", margin: "2px 0 0" }}>
+                      {d.confianza && <span>Confianza: <b style={{ color: confColor[d.confianza] || "#6b7280" }}>{d.confianza}</b></span>}
+                      {d.fuente && <span> · Fuente: {d.fuente}</span>}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {b2.sintesis?.no_verificados?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", margin: "0 0 6px" }}>❔ Elementos no verificados</p>
+                {b2.sintesis.no_verificados.map((n, i) => <p key={i} style={{ fontSize: 13, margin: "0 0 6px", paddingLeft: 12, borderLeft: "3px solid #d1d5db", color: "#374151", lineHeight: 1.5 }}>{n}</p>)}
+              </div>
+            )}
+
+            {b2.sintesis?.plataformas_pendientes?.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#185FA5", margin: "0 0 6px" }}>🔎 Plataformas que requieren investigación posterior</p>
+                {b2.sintesis.plataformas_pendientes.map((p, i) => <p key={i} style={{ fontSize: 13, margin: "0 0 6px", paddingLeft: 12, borderLeft: "3px solid #93c5fd", color: "#374151", lineHeight: 1.5 }}>{p}</p>)}
+              </div>
+            )}
+
+            {b2.sintesis?.proximo_paso && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: NAVY, margin: "0 0 6px" }}>➡️ Próximo paso</p>
+                <p style={{ fontSize: 13, margin: 0, paddingLeft: 12, borderLeft: `3px solid ${GOLD}`, color: "#374151", lineHeight: 1.5 }}>{b2.sintesis.proximo_paso}</p>
+              </div>
+            )}
+
+            <div style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 14px" }}>
+              <p style={{ fontSize: 12, color: "#374151", margin: 0 }}>📅 <b>Fecha estimada de entrega del informe de correcciones:</b> {fechaEntrega()} (aprox. 48 horas)</p>
+            </div>
+          </div>
+
+          <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 12 }}>
+            <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 6px", color: "#111827" }}>🗂️ Hallazgos con fuentes y nivel de confianza</p>
+            <p style={{ fontSize: 11, color: "#9ca3af", margin: "0 0 12px" }}>Todos los hallazgos de la revisión inicial, con su evidencia, confianza, fuente y estado de revisión.</p>
+            {allHallazgos.length === 0 && (
+              <p style={{ fontSize: 12, color: "#9ca3af", margin: 0, fontStyle: "italic" }}>Sin hallazgos con evidencia suficiente en esta revisión inicial.</p>
+            )}
+            {allHallazgos.map((h, i) => (
+              <div key={i} style={{ borderLeft: `3px solid ${h.tipo === "fortaleza" ? "#2E7D32" : "#E65100"}`, paddingLeft: 12, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: NAVY, background: NAVY + "12", padding: "1px 8px", borderRadius: 8 }}>{h.canal}</span>
+                  <EvBadge ev={h.evidencia} />
+                </div>
+                <p style={{ fontWeight: 500, fontSize: 13, margin: "2px 0", color: "#111827" }}>{h.titulo}</p>
+                <p style={{ fontSize: 12, color: "#6b7280", margin: 0, lineHeight: 1.5 }}>{h.detalle}</p>
+                <MetaLine h={h} />
+              </div>
+            ))}
+          </div>
+
+          {pendientes.length > 0 && (
+            <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem", marginBottom: 12 }}>
+              <p style={{ fontWeight: 500, fontSize: 14, margin: "0 0 12px", color: "#111827" }}>⏳ Pendientes de verificar ({pendientes.length})</p>
+              {pendientes.map((h, i) => (
+                <p key={i} style={{ fontSize: 12, margin: "0 0 6px", paddingLeft: 12, borderLeft: "3px solid #d1d5db", color: "#6b7280", lineHeight: 1.5 }}>
+                  <b style={{ color: "#374151" }}>{h.canal}:</b> {h.titulo}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div style={{ background: "#ffffff", border: "1px solid #e5e7eb", borderRadius: 12, padding: "1rem 1.25rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <p style={{ fontWeight: 500, fontSize: 14, margin: 0, color: "#111827" }}>💬 Mensaje de cierre (WhatsApp)</p>
+              <button onClick={() => { navigator.clipboard.writeText(b2.mensaje_cierre || ""); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid #e5e7eb", background: copied ? "#f0fdf4" : "#f9fafb", cursor: "pointer", color: copied ? "#16a34a" : "#6b7280" }}>
+                {copied ? "✓ Copiado" : "Copiar"}
+              </button>
+            </div>
+            <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "12px 14px" }}>
+              <p style={{ fontSize: 13, lineHeight: 1.8, margin: 0, color: "#14532d", whiteSpace: "pre-wrap" }}>{b2.mensaje_cierre}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <p style={{ textAlign: "center", fontSize: 11, color: "#9ca3af", marginTop: 20 }}>
+        VersaPro Solution TX LLC · Field Prospecting · Powered by Claude AI
+      </p>
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+</script>
+</body>
+</html>
