@@ -56,69 +56,80 @@ const REALTOR_DEFAULT_PRICES = {
   "Guía de video (grabación + edición)": 99,
   "Mantenimiento digital mensual": 249,
 };
-const SYSTEM_R1 = `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
+const PROTOCOLO = `PROTOCOLO DE BÚSQUEDA (obligatorio ANTES de declarar que un activo no fue localizado): busca con web_search usando variantes razonables — nombre completo; con y sin segundo apellido; nombre unido y separado (ej. "Marialejandra" / "Maria Alejandra"); nombre + ciudad; nombre + Realtor; nombre + Real Estate; nombre + brokerage si se conoce; teléfono si está disponible; y toda clave nueva que aporte un activo ya confirmado (usuario de Instagram, nombre exacto de la ficha de Google, teléfono o correo visto en un directorio, nombre de equipo). Un activo encontrado da claves para buscar los demás. Registra las variantes usadas en "busquedas".
+ESTADOS DE CERTEZA (cada activo lleva "estado"): "CONFIRMADO" = evidencia suficiente (perfil/URL visto); "REQUIERE_VERIFICACION" = hay información pero no se puede concluir (perfil sin reclamar, datos contradictorios, nombre distinto); "NO_LOCALIZADO" = las búsquedas realizadas no lo localizaron, lo cual NO significa que no exista. PROHIBIDO convertir NO_LOCALIZADO en "no existe", "ausente", "sin perfil", "0 reseñas", "inactivo" o "incumplimiento". Si el estado no es CONFIRMADO: score = null, cantidades de reseñas/seguidores = null, y los items dicen "no localizado en la revisión inicial — confirmar con el cliente (URL, usuario o teléfono) y repetir la búsqueda". En "evidencia" pon la URL o fuente vista; si no la viste, "".
+CUMPLIMIENTO: marca "incumplimiento" SOLO con evidencia visible en un activo confirmado (ej. el sitio muestra el teléfono sin el nombre del brokerage). Si solo falta información o no localizaste el registro TREC/DBPR del agente, usa exactamente: "Información TREC/FREC-DBPR pendiente de verificación" con estado REQUIERE_VERIFICACION. Un registro de licencia no localizado NO es falta de licencia.
+IDENTIDAD: registra TODAS las formas del nombre que veas en las plataformas en identidad.nombres_encontrados (y teléfonos en telefonos_encontrados). Si difieren, nap_inconsistente=true y recomienda verificar primero el nombre profesional/licenciado correcto con el agente; NO decidas tú cuál debe usarse.
+AFIRMACIONES: cifras (seguidores, ventas, reseñas, ratings, años, premios) solo si las viste; de lo contrario null o "por verificar". Nada de promesas de resultado: prohibido "#1", "número 1", "posicionarte como", "superar a", "garantizado".
+`;
+const SYSTEM_R1 = PROTOCOLO + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
 Usa web_search para investigar el sitio web, Google Business Profile, Zillow y Realtor.com del AGENTE (no de la agencia/brokerage).
 Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
 Detalles máximo 10 palabras cada uno.
 
-{"nombre":"","tipo":"Realtor","ciudad":"","estado":"Texas o Florida","brokerage":"","url_encontrada":"url o No encontrado","resumen":"2 oraciones cortas con datos reales",
+{"nombre":"","tipo":"Realtor","ciudad":"","estado":"Texas o Florida","brokerage":"","url_encontrada":"url o No localizado","resumen":"2 oraciones cortas con datos reales; distingue lo confirmado de lo pendiente",
+"busquedas":["variantes de búsqueda usadas"],
+"identidad":{"nombres_encontrados":["forma 1","forma 2"],"telefonos_encontrados":[],"nap_inconsistente":false,"d":"qué difiere entre plataformas"},
+"cumplimiento":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","d":"evidencia o 'Información TREC/FREC-DBPR pendiente de verificación'"},
 "scores_web":0,"scores_gmaps":0,"scores_zillow":0,"scores_directorios":0,
-"analisis_web":{"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
-"analisis_gmaps":{"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
-"analisis_zillow":{"encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"v":"Completo/Parcial/Ausente","d":""}},
-"analisis_directorios":{"homes_com":{"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
+"analisis_web":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_zillow":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","v":"Completo/Parcial/Por verificar","d":""}},
+"analisis_directorios":{"homes_com":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_zillow":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_directorios":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "fortalezas":["f1","f2"]}
-Reglas: scores 0-100, status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 2 items cada categoría.
-La página web DEBE evaluarse por cumplimiento: Texas requiere aviso TREC (IABS/Consumer Protection Notice) y afiliación al broker visible; Florida requiere nombre del brokerage visible (FREC/DBPR). Refleja esto en el detalle de "contacto" o "seo" de analisis_web. SOLO JSON.`;
+Reglas: scores 0-100 solo para activos CONFIRMADOS (null si no), status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 2 items cada categoría.
+La página web se evalúa por cumplimiento SOLO si está confirmada: Texas requiere aviso TREC (IABS/Consumer Protection Notice) y afiliación al broker visible; Florida requiere nombre del brokerage junto al contacto (61J2-10.025). Si no puedes verlo, "cumplimiento" queda REQUIERE_VERIFICACION con el texto de pendiente. SOLO JSON.`;
 
-const SYSTEM_R2 = `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
+const SYSTEM_R2 = PROTOCOLO + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
 Investiga WhatsApp Business, Instagram, Facebook y realtors competidores del MISMO mercado/zona. Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
 Detalles máximo 10 palabras.
 
 {"scores_social":0,
-"social":[{"red":"WhatsApp Business","handle":"","seguidores":"Con catálogo/Sin catálogo","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""},{"red":"Facebook","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""},{"red":"TikTok","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""}],
+"social":[{"red":"WhatsApp Business","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"Con catálogo/Sin catálogo/Por verificar","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"Facebook","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"TikTok","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
-"competidores":[{"nombre":"","zona":"","nicho":"Realtor","scores":{"web":0,"gmaps":0,"zillow":0,"social":0},"resenas":"","fortaleza":"","debilidad":""}],
-"referente_top":{"nombre":"","ciudad":"","por_que":"1 oración: qué hace bien en digital que es alcanzable"},
+"competidores":[{"nombre":"","zona":"","nicho":"Realtor","verificado":false,"evidencia":"","scores":{"web":null,"gmaps":null,"zillow":null,"social":null},"resenas":"por verificar","fortaleza":"","debilidad":""}],
+"referente_top":{"nombre":"","ciudad":"","verificado":false,"evidencia":"","por_que":"1 oración descriptiva de lo que hace bien (sin promesas ni metas de superar a nadie)"},
 "oportunidades":["o1","o2","o3"],
 "plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
 "mensaje_cierre":"mensaje WhatsApp máximo 4 líneas"}
-Reglas: exactamente 2-3 competidores realtors de la MISMA zona/mercado (agentes reales que aparezcan en Google Maps/Zillow de esa área), plan máximo 4 pasos.
-referente_top: un realtor hispano exitoso y reconocido en Texas o Florida (no necesariamente de la misma zona) como modelo aspiracional de presencia digital.
+Reglas: 2-3 competidores realtors de la MISMA zona/mercado SOLO si los viste en Google Maps/Zillow de esa área (verificado=true con evidencia); si no los verificaste, verificado=false y scores null. Plan máximo 4 pasos, sin promesas de resultado. Si un activo del paso 1 quedó NO_LOCALIZADO o REQUIERE_VERIFICACION, el plan y las oportunidades empiezan por "verificar con el agente", no por "crear desde cero".
+referente_top: un realtor hispano con presencia digital reconocida en Texas o Florida, descrito sin comparaciones ni metas ("superar", "#1"); verificado=false si no revisaste sus perfiles.
 servicio: "Diagnóstico + Kit Realtor"|"Página web para agente"|"Configuración WhatsApp Business"|"Setup Instagram/Facebook + bio"|"Plan de contenido mensual (redes)"|"Gestión de reseñas (1 mes)"|"Optimización Google Business + Zillow"|"Guía de video (grabación + edición)"|"Mantenimiento digital mensual"
 SOLO JSON.`;
 
-const SYSTEM_B1 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+const SYSTEM_B1 = PROTOCOLO + `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
 Usa web_search para investigar el sitio web y Google Business Profile del negocio.
 Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
 Detalles máximo 10 palabras cada uno.
 
-{"nombre":"","tipo":"","ciudad":"","url_encontrada":"url o No encontrado","resumen":"2 oraciones cortas con datos reales",
+{"nombre":"","tipo":"","ciudad":"","url_encontrada":"url o No localizado","resumen":"2 oraciones cortas con datos reales; distingue lo confirmado de lo pendiente",
+"busquedas":["variantes de búsqueda usadas"],
+"identidad":{"nombres_encontrados":["forma 1"],"telefonos_encontrados":[],"nap_inconsistente":false,"d":""},
 "scores_web":0,"scores_gmaps":0,
-"analisis_web":{"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
-"analisis_gmaps":{"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_web":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "fortalezas":["f1","f2"]}
-Reglas: scores 0-100, status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 3 items. SOLO JSON.`;
+Reglas: scores 0-100 solo para activos CONFIRMADOS (null si no), status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 3 items. SOLO JSON.`;
 
-const SYSTEM_B2 = `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+const SYSTEM_B2 = PROTOCOLO + `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
 Investiga redes sociales y competidores del MISMO NICHO. Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
 Detalles máximo 10 palabras.
 
 {"scores_social":0,"scores_ads":0,
-"social":[{"red":"Instagram","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo","calidad":"Alta/Media/Baja","d":""}],
+"social":[{"red":"Instagram","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
-"competidores":[{"nombre":"","zona":"","nicho":"","scores":{"web":0,"gmaps":0,"social":0},"resenas":"","fortaleza":"","debilidad":""}],
+"competidores":[{"nombre":"","zona":"","nicho":"","verificado":false,"evidencia":"","scores":{"web":null,"gmaps":null,"social":null},"resenas":"por verificar","fortaleza":"","debilidad":""}],
 "oportunidades":["o1","o2","o3"],
 "ads":{"conviene":true,"tipo":"Google Ads/Local Services Ads/No recomendado","objetivo":"Llamadas/Formularios/Visitas","kw":["kw1","kw2"],"presupuesto":"$X-$Y/mes","errores":["e1","e2"]},
 "plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
 "mensaje_cierre":"mensaje WhatsApp máximo 4 líneas"}
-Reglas: exactamente 3 competidores del MISMO nicho, plan máximo 4 pasos.
+Reglas: hasta 3 competidores del MISMO nicho SOLO si los viste (verificado=true con evidencia; si no, verificado=false y scores null), plan máximo 4 pasos sin promesas de resultado.
 servicio: "Optimización SEO básica"|"Rediseño o mejora visual web"|"Configuración Google Business Profile"|"Gestión de reseñas (1 mes)"|"Setup redes sociales + bio"|"Plan de contenido mensual"|"Campaña Google Ads (setup)"|"Mantenimiento digital mensual"|"Sitio web completo (5 páginas)"|"Redirección y configuración de dominio"
 SOLO JSON.`;
 
@@ -199,19 +210,47 @@ function App() {
       const d1 = await callAPI(isRealtor ? SYSTEM_R1 : SYSTEM_B1, base);
       setB1(d1);
       setLoadMsg(isRealtor ? "📱 Analizando redes, WhatsApp y competidores..." : "📱 Analizando redes y competidores...");
-      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\nNombre: ${d1.nombre}, Ciudad: ${d1.ciudad}, URL: ${d1.url_encontrada}`);
+      const claves = [
+        `Nombre: ${d1.nombre}`, `Ciudad: ${d1.ciudad}`, `URL: ${d1.url_encontrada}`,
+        d1.brokerage ? `Brokerage: ${d1.brokerage}` : "",
+        d1.identidad?.nombres_encontrados?.length ? `Formas del nombre ya vistas: ${d1.identidad.nombres_encontrados.join(" | ")}` : "",
+        d1.identidad?.telefonos_encontrados?.length ? `Teléfonos vistos: ${d1.identidad.telefonos_encontrados.join(", ")}` : "",
+        d1.analisis_gmaps?.nombre_perfil ? `Nombre de la ficha de Google: ${d1.analisis_gmaps.nombre_perfil}` : "",
+        d1.busquedas?.length ? `Variantes ya probadas: ${d1.busquedas.join("; ")}` : "",
+      ].filter(Boolean).join("\n");
+      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa estas claves como variantes de búsqueda antes de declarar cualquier red como no localizada.`);
       setB2(d2);
       setStep("report");
     } catch(e) { setError("Error: "+e.message); }
     setLoading(false);
   };
 
-  const sc = s => s>=70?"#2E7D32":s>=40?"#E65100":"#C62828";
-  const stC = { critico:"#C62828", mejorable:"#E65100", bien:"#2E7D32" };
-  const stL = { critico:"🔴 Crítico", mejorable:"🟡 Mejorable", bien:"🟢 Bien" };
-  const tgC = v => ["Rápido","Bueno","Optimizado","Completo","Claro","Profesional","Correctas","Muchas","Sí","Alta","Activo","Completa"].includes(v)?"#2E7D32":["Medio","Regular","Parcial","Básica","Pocas","Media","Semanal","Incompletas"].includes(v)?"#E65100":"#C62828";
 
-  const SB = ({score,small}) => React.createElement('div',{style:{display:"flex",alignItems:"center",gap:6}},
+  // ---------- Certeza: estados, saneamiento y puntuación prudente ----------
+  const EST = { CONFIRMADO:{l:"✓ Confirmado",c:"#16a34a",bg:"#f0fdf4"}, REQUIERE_VERIFICACION:{l:"⏳ Requiere verificación",c:"#d97706",bg:"#fffbeb"}, NO_LOCALIZADO:{l:"🔎 No localizado en la revisión inicial",c:"#6b7280",bg:"#f3f4f6"} };
+  const normEstado = v => { const k=String(v||"").toUpperCase().replace(/\s+/g,"_").replace("VERIFICACIÓN","VERIFICACION"); return EST[k]?k:null; };
+  const estadoDe = obj => { if(!obj) return "NO_LOCALIZADO"; const e=normEstado(obj.estado); if(e) return e; if(obj.encontrado===false) return "NO_LOCALIZADO"; if(obj.encontrado===true) return "CONFIRMADO"; return "REQUIERE_VERIFICACION"; };
+  const EstadoBadge = ({estado}) => { const e=EST[estado]||EST.REQUIERE_VERIFICACION; return React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:10,background:e.bg,color:e.c,fontWeight:500,whiteSpace:"nowrap"}},e.l); };
+  const NO_LOC_NOTA = "No localizado durante la revisión inicial: no equivale a que no exista. Confirmar con el cliente (URL, usuario o teléfono) y repetir la búsqueda.";
+  const PROMESA = /(#\s?1\b|n[úu]mero\s*1\b|posicionarte como|posicionarse como|superar a\b|superar al\b|garantiz)/i;
+  const AUSENCIA = /(\bno existe\b|\bausente\b|\bsin (perfil|ficha|p[áa]gina|sitio|reseñas|presencia)\b|\b0 reseñas\b|\bno tiene\b|\binactiv|incumplimiento)/i;
+  const sinPromesas = t => { if(!t) return t; const fr=String(t).split(/(?<=[.!?])\s+/).filter(x=>!PROMESA.test(x)); return fr.join(" ").trim(); };
+  const sinPromesasLista = arr => (arr||[]).map(sinPromesas).filter(x=>x&&x.length>3);
+  // Items de un área: si el activo no está confirmado, no se admiten conclusiones de ausencia.
+  const itemsSeguros = (items, estado) => {
+    if(estado==="CONFIRMADO") return items||[];
+    const base = [{status:"mejorable",titulo: estado==="NO_LOCALIZADO"?"No localizado durante la revisión inicial":"Requiere verificación",detalle: estado==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; confirmar con el cliente antes de actuar.",tipo:"pendiente"}];
+    const resto=(items||[]).filter(it=>!AUSENCIA.test((it.titulo||"")+" "+(it.detalle||""))).map(it=>({...it,status:it.status==="critico"?"mejorable":it.status}));
+    return base.concat(resto);
+  };
+  const stC2 = { critico:"#C62828", mejorable:"#E65100", bien:"#2E7D32", pendiente:"#6b7280" };
+  const cumplimientoTexto = c => { const e=estadoDe(c||{}); if(e!=="CONFIRMADO") return {estado:e,texto:"Información TREC/FREC-DBPR pendiente de verificación."}; return {estado:e,texto:(c&&c.d)||"Cumplimiento verificado en los activos revisados."}; };
+  const sc = s => s>=70?"#2E7D32":s>=40?"#E65100":"#C62828";
+  const stC = stC2;
+  const stL = { critico:"🔴 Crítico", mejorable:"🟡 Mejorable", bien:"🟢 Bien", pendiente:"⚪ Por verificar" };
+  const tgC = v => ["Rápido","Bueno","Optimizado","Completo","Claro","Profesional","Correctas","Muchas","Sí","Alta","Activo","Completa"].includes(v)?"#2E7D32":["Medio","Regular","Parcial","Básica","Pocas","Media","Semanal","Incompletas"].includes(v)?"#E65100":/por verificar/i.test(v||"")?"#6b7280":"#C62828";
+
+  const SB = ({score,small}) => (score===null||score===undefined) ? React.createElement('span',{style:{fontSize:small?10:12,color:"#6b7280"}},"— por verificar") : React.createElement('div',{style:{display:"flex",alignItems:"center",gap:6}},
     !small&&React.createElement('span',{style:{fontSize:13,fontWeight:700,color:sc(score),minWidth:30}},score),
     React.createElement('div',{style:{flex:1,height:small?4:7,background:"#e0e0e0",borderRadius:4}},
       React.createElement('div',{style:{height:"100%",width:`${score}%`,background:sc(score),borderRadius:4}})),
@@ -229,9 +268,23 @@ function App() {
   ));
 
   const card = (children,extra={}) => React.createElement('div',{style:{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:"1rem 1.25rem",marginBottom:12,...extra}},children);
+  const estWeb = b1 ? (b1.analisis_web?.estado ? estadoDe(b1.analisis_web) : (/^https?:|www\./i.test(b1.url_encontrada||"")?"CONFIRMADO":"NO_LOCALIZADO")) : "NO_LOCALIZADO";
+  const estGmaps = estadoDe(b1?.analisis_gmaps);
+  const estZillow = estadoDe(b1?.analisis_zillow);
+  const dirEst = b1?.analisis_directorios ? Object.values(b1.analisis_directorios).map(estadoDe) : [];
+  const estDir = dirEst.includes("CONFIRMADO")?"CONFIRMADO":dirEst.includes("REQUIERE_VERIFICACION")?"REQUIERE_VERIFICACION":"NO_LOCALIZADO";
+  const socEst = (b2?.social||[]).map(estadoDe);
+  const estSocial = socEst.includes("CONFIRMADO")?"CONFIRMADO":socEst.includes("REQUIERE_VERIFICACION")?"REQUIERE_VERIFICACION":"NO_LOCALIZADO";
+  const areaEstados = tipo==="realtor" ? {web:estWeb,gmaps:estGmaps,zillow:estZillow,directorios:estDir,social:estSocial} : {web:estWeb,gmaps:estGmaps,social:estSocial,ads:"CONFIRMADO"};
+  const num = v => (v===null||v===undefined||isNaN(Number(v))) ? null : Number(v);
+  const conCerteza = (v,est) => est==="CONFIRMADO" ? num(v) : null;
   const scores = tipo==="realtor"
-    ? {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,zillow:b1?.scores_zillow??0,directorios:b1?.scores_directorios??0,social:b2?.scores_social??0}
-    : {web:b1?.scores_web??0,gmaps:b1?.scores_gmaps??0,social:b2?.scores_social??0,ads:b2?.scores_ads??0};
+    ? {web:conCerteza(b1?.scores_web,estWeb),gmaps:conCerteza(b1?.scores_gmaps,estGmaps),zillow:conCerteza(b1?.scores_zillow,estZillow),directorios:conCerteza(b1?.scores_directorios,estDir),social:conCerteza(b2?.scores_social,estSocial)}
+    : {web:conCerteza(b1?.scores_web,estWeb),gmaps:conCerteza(b1?.scores_gmaps,estGmaps),social:conCerteza(b2?.scores_social,estSocial),ads:num(b2?.scores_ads)};
+  const areasTotal = Object.keys(scores).length;
+  const areasConfirmadas = Object.values(scores).filter(v=>v!==null).length;
+  const pendientes = Object.entries(areaEstados).filter(([k,e])=>e!=="CONFIRMADO");
+  const necesita = { web:"URL del sitio web (si existe)", gmaps:"nombre exacto de la ficha de Google Business o enlace de Maps", zillow:"enlace del perfil de Zillow y de Realtor.com", directorios:"enlaces de Homes.com / MapQuest / Yelp si los tiene", social:"usuarios exactos de Instagram, Facebook y TikTok; número de WhatsApp Business", ads:"" };
   const totalPlan = b2?.plan?.reduce((acc,p)=>acc+(prices[p.servicio]||0),0)||0;
 
   if (step==="intake") return React.createElement('div',{style:{maxWidth:680,margin:"0 auto"}},
@@ -300,12 +353,20 @@ function App() {
     }).catch(() => setGeneratingImg(false));
   };
 
-  const avgScore = Math.round(Object.values(scores).reduce((a,c)=>a+c,0) / Math.max(1,Object.values(scores).length));
-  const semaforo = avgScore>=70?{e:"🟢",t:"Presencia sólida"}:avgScore>=40?{e:"🟡",t:"En construcción"}:{e:"🔴",t:"Presencia crítica"};
-  const itemsAll = [...(b1.items_web||[]),...(b1.items_gmaps||[]),...(tipo==="realtor"?[...(b1.items_zillow||[]),...(b1.items_directorios||[])]:[]),...(b2.items_social||[])];
-  const topHuecos = itemsAll.filter(i=>i.status==="critico").concat(itemsAll.filter(i=>i.status==="mejorable")).slice(0,3);
+  const vals = Object.values(scores).filter(v=>v!==null);
+  const avgScore = vals.length ? Math.round(vals.reduce((a,c)=>a+c,0)/vals.length) : null;
+  const certezaOk = areasConfirmadas >= Math.ceil(areasTotal/2);
+  const semaforo = avgScore===null ? {e:"⚪",t:"Sin puntuar: activos por verificar"} : !certezaOk ? {e:"⚪",t:`Preliminar · ${areasTotal-areasConfirmadas} de ${areasTotal} áreas por verificar`} : avgScore>=70?{e:"🟢",t:"Presencia sólida"}:avgScore>=40?{e:"🟡",t:"En construcción"}:{e:"🔴",t:"Presencia crítica"};
+  const itemsWebS = itemsSeguros(b1.items_web,estWeb), itemsGmapsS = itemsSeguros(b1.items_gmaps,estGmaps), itemsZillowS = itemsSeguros(b1.items_zillow,estZillow), itemsDirS = itemsSeguros(b1.items_directorios,estDir), itemsSocialS = itemsSeguros(b2.items_social,estSocial);
+  const itemsAll = [...itemsWebS,...itemsGmapsS,...(tipo==="realtor"?[...itemsZillowS,...itemsDirS]:[]),...itemsSocialS];
+  const topHuecos = itemsAll.filter(i=>i.status==="critico"&&i.tipo!=="pendiente").concat(itemsAll.filter(i=>i.status==="mejorable"&&i.tipo!=="pendiente")).slice(0,3);
+  const areasPorVerificar = pendientes.map(([k])=>(tipo==="realtor"?REALTOR_AREAS:AREAS).find(a=>a.key===k)?.label||k);
   const topFortalezas = (b1.fortalezas||[]).slice(0,3);
-  const competidorTop = b2.competidores?.[0];
+  const competidorTop = (b2.competidores||[]).find(c=>c.verificado===true);
+  const cumpl = cumplimientoTexto(b1.cumplimiento);
+  const identidad = b1.identidad||{};
+  const nombresVistos = Array.from(new Set([...(identidad.nombres_encontrados||[]), b1.analisis_gmaps?.nombre_perfil, b1.analisis_zillow?.nombre_perfil, ...(b2.social||[]).map(x=>x.handle)].filter(Boolean)));
+  const napInconsistente = identidad.nap_inconsistente===true || nombresVistos.length>1;
   const serviciosKit = (b2.plan||[]).slice(0,3).map(p=>p.titulo);
 
   const tabs = tipo==="realtor"
@@ -316,7 +377,7 @@ function App() {
     React.createElement('div',{style:{background:NAVY,borderRadius:12,padding:"1rem 1.25rem",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}},
       React.createElement('div',null,
         React.createElement('p',{style:{color:GOLD,fontWeight:700,fontSize:15,margin:0}},b1.nombre),
-        React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:"2px 0 0"}},`${b1.tipo} · ${b1.ciudad}`)
+        React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:"2px 0 0"}},`${b1.tipo} · ${b1.ciudad} · preliminar: ${areasConfirmadas}/${areasTotal} áreas confirmadas`)
       ),
       React.createElement('button',{onClick:()=>{setStep("intake");setB1(null);setB2(null);setNegocio("");setNotas("");},
         style:{background:"transparent",border:"1px solid #8FA8C8",color:"#8FA8C8",borderRadius:6,padding:"4px 12px",fontSize:12,cursor:"pointer"}},"Nuevo")
@@ -338,12 +399,38 @@ function App() {
       ),
 
       tab==="resumen"&&React.createElement('div',null,
-        card(React.createElement('p',{style:{fontSize:13,color:"#374151",lineHeight:1.7,margin:0}},b1.resumen),{background:"#f9fafb"}),
+        card(React.createElement('div',null,
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}},
+            React.createElement('p',{style:{fontWeight:600,fontSize:14,margin:0}},"Diagnóstico preliminar"),
+            React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:10,background:certezaOk?"#f0fdf4":"#fffbeb",color:certezaOk?"#16a34a":"#d97706",fontWeight:500}},`${areasConfirmadas} de ${areasTotal} áreas confirmadas`)
+          ),
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.6}},"Las áreas no confirmadas no puntúan ni se cuentan como ausentes: primero se verifican con el cliente. La puntuación general se calcula solo con lo confirmado.")
+        ),{background:"#f9fafb"}),
+        card(React.createElement('p',{style:{fontSize:13,color:"#374151",lineHeight:1.7,margin:0}},sinPromesas(b1.resumen)),{background:"#f9fafb"}),
+        pendientes.length>0&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 8px"}},"🔎 Para concluir la verificación necesitamos"),
+          pendientes.map(([k,e])=>necesita[k]&&React.createElement('div',{key:k,style:{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}},
+            React.createElement(EstadoBadge,{estado:e}),
+            React.createElement('p',{style:{fontSize:12,color:"#374151",margin:0,lineHeight:1.5}},`${(tipo==="realtor"?REALTOR_AREAS:AREAS).find(a=>a.key===k)?.label||k}: ${necesita[k]}`)
+          ))
+        ),{border:"1px solid #fde68a",background:"#fffbeb"}),
+        napInconsistente&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 6px"}},"🪪 Identidad digital: formas del nombre encontradas"),
+          React.createElement('div',{style:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}},nombresVistos.map((n,i)=>React.createElement('span',{key:i,style:{fontSize:12,background:NAVY+"12",color:NAVY,padding:"3px 10px",borderRadius:20}},n))),
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},(identidad.d?identidad.d+" ":"")+"Antes de corregir cualquier perfil, verificar con el agente cuál es su nombre profesional/licenciado correcto; el diagnóstico no decide cuál usar.")
+        )),
+        tipo==="realtor"&&card(React.createElement('div',null,
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+            React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"📋 Cumplimiento estatal"),
+            React.createElement(EstadoBadge,{estado:cumpl.estado})
+          ),
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},cumpl.texto)
+        )),
         React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}},
           (tipo==="realtor"?REALTOR_AREAS:AREAS).map(a=>card(React.createElement('div',null,
             React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
               React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},`${a.icon} ${a.label}`),
-              React.createElement('p',{style:{fontSize:20,fontWeight:700,color:sc(scores[a.key]),margin:0}},scores[a.key])
+              scores[a.key]!==null?React.createElement('p',{style:{fontSize:20,fontWeight:700,color:sc(scores[a.key]),margin:0}},scores[a.key]):React.createElement(EstadoBadge,{estado:areaEstados[a.key]})
             ),
             React.createElement(SB,{score:scores[a.key]})
           ),{key:a.key,marginBottom:0}))
@@ -374,15 +461,14 @@ function App() {
             b1.analisis_web.kw.map((kw,i)=>React.createElement('span',{key:i,style:{fontSize:12,background:NAVY+"12",color:NAVY,padding:"4px 12px",borderRadius:20,fontWeight:500}},kw))
           )
         )),
-        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas web"),React.createElement(IL,{items:b1.items_web})))
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas web"),React.createElement(IL,{items:itemsWebS})))
       ),
 
       tab==="gmaps"&&b1.analisis_gmaps&&React.createElement('div',null,
         card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
             React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"📍 Google Business Profile"),
-            React.createElement('span',{style:{fontSize:12,padding:"3px 10px",borderRadius:10,background:b1.analisis_gmaps.encontrado?"#f0fdf4":"#fef2f2",color:b1.analisis_gmaps.encontrado?"#16a34a":"#dc2626",fontWeight:500}},
-              b1.analisis_gmaps.encontrado?"✓ Encontrado":"✗ No encontrado")
+            React.createElement(EstadoBadge,{estado:estGmaps})
           ),
           [["Nombre",{v:b1.analisis_gmaps.nombre_perfil,d:""}],["Categorías",b1.analisis_gmaps.categorias],["Contacto",b1.analisis_gmaps.contacto],["Fotos",b1.analisis_gmaps.fotos],["Descripción",b1.analisis_gmaps.descripcion],["Publicaciones",b1.analisis_gmaps.publicaciones]].map(([lbl,obj],i)=>obj&&
             React.createElement('div',{key:lbl,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #f3f4f6"}},
@@ -393,7 +479,8 @@ function App() {
               React.createElement(Tag,{valor:obj.v})
             )
           ),
-          b1.analisis_gmaps.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
+          estGmaps!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"6px 0 0",lineHeight:1.5}},estGmaps==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; las cifras se muestran solo cuando el perfil esté confirmado."),
+          estGmaps==="CONFIRMADO"&&b1.analisis_gmaps.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
             React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 6px"}},"Reseñas"),
             React.createElement('div',{style:{display:"flex",gap:16}},
               React.createElement('span',{style:{fontSize:13}},`⭐ ${b1.analisis_gmaps.resenas.promedio}`),
@@ -402,15 +489,14 @@ function App() {
             )
           )
         )),
-        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Google Maps"),React.createElement(IL,{items:b1.items_gmaps})))
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Google Maps"),React.createElement(IL,{items:itemsGmapsS})))
       ),
 
       tab==="zillow"&&b1.analisis_zillow&&React.createElement('div',null,
         card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
             React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"🏠 Zillow / Realtor.com"),
-            React.createElement('span',{style:{fontSize:12,padding:"3px 10px",borderRadius:10,background:b1.analisis_zillow.encontrado?"#f0fdf4":"#fef2f2",color:b1.analisis_zillow.encontrado?"#16a34a":"#dc2626",fontWeight:500}},
-              b1.analisis_zillow.encontrado?"✓ Encontrado":"✗ No encontrado")
+            React.createElement(EstadoBadge,{estado:estZillow})
           ),
           [["Nombre",{v:b1.analisis_zillow.nombre_perfil,d:""}],["Perfil reclamado",b1.analisis_zillow.perfil_reclamado],["Ventas pasadas",b1.analisis_zillow.ventas_pasadas],["Listings activos",b1.analisis_zillow.listings_activos],["Realtor.com",b1.analisis_zillow.realtor_com]].map(([lbl,obj])=>obj&&(obj.v||obj.d)&&
             React.createElement('div',{key:lbl,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #f3f4f6"}},
@@ -421,7 +507,8 @@ function App() {
               obj.v&&React.createElement(Tag,{valor:obj.v})
             )
           ),
-          b1.analisis_zillow.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
+          estZillow!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"6px 0 0",lineHeight:1.5}},estZillow==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; las cifras se muestran solo cuando el perfil esté confirmado."),
+          estZillow==="CONFIRMADO"&&b1.analisis_zillow.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
             React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 6px"}},"Reseñas Zillow"),
             React.createElement('div',{style:{display:"flex",gap:16}},
               React.createElement('span',{style:{fontSize:13}},`⭐ ${b1.analisis_zillow.resenas.promedio}`),
@@ -429,7 +516,7 @@ function App() {
             )
           )
         )),
-        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Zillow/Realtor.com"),React.createElement(IL,{items:b1.items_zillow})))
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas Zillow/Realtor.com"),React.createElement(IL,{items:itemsZillowS})))
       ),
 
       tab==="directorios"&&b1.analisis_directorios&&React.createElement('div',null,
@@ -439,43 +526,47 @@ function App() {
             React.createElement('div',{key:lbl,style:{padding:"10px 0",borderBottom:"1px solid #f3f4f6"}},
               React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
                 React.createElement('p',{style:{fontSize:13,fontWeight:600,margin:0}},lbl),
-                React.createElement('span',{style:{fontSize:11,padding:"2px 8px",borderRadius:10,background:d.encontrado?"#f0fdf4":"#fef2f2",color:d.encontrado?"#16a34a":"#dc2626",fontWeight:500}},d.encontrado?"✓ Encontrado":"✗ No encontrado")
+                React.createElement(EstadoBadge,{estado:estadoDe(d)})
               ),
               d.completitud&&React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
                 d.completitud.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,flex:1}},d.completitud.d),
                 React.createElement(Tag,{valor:d.completitud.v})
               ),
-              d.resenas&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"4px 0 0"}},`⭐ ${d.resenas.promedio} · ${d.resenas.cantidad} reseñas`)
+              estadoDe(d)==="CONFIRMADO"&&d.resenas&&d.resenas.cantidad!==null&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"4px 0 0"}},`⭐ ${d.resenas.promedio} · ${d.resenas.cantidad} reseñas`)
             )
           )
         )),
-        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en directorios"),React.createElement(IL,{items:b1.items_directorios})))
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en directorios"),React.createElement(IL,{items:itemsDirS})))
       ),
 
       tab==="social"&&React.createElement('div',null,
         b2.social?.map((p,i)=>card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
             React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},`📱 ${p.red}`),
-            React.createElement('span',{style:{fontSize:12,color:"#9ca3af"}},p.handle)
+            React.createElement('div',{style:{display:"flex",gap:8,alignItems:"center"}},React.createElement('span',{style:{fontSize:12,color:"#9ca3af"}},p.handle),React.createElement(EstadoBadge,{estado:estadoDe(p)}))
           ),
           React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
             (p.red==="WhatsApp Business"?[["Catálogo",p.seguidores],["Respuesta",p.frecuencia],["Calidad",p.calidad]]:[["Seguidores",p.seguidores],["Frecuencia",p.frecuencia],["Calidad",p.calidad]]).map(([l,v])=>
               React.createElement('div',{key:l,style:{background:"#f9fafb",borderRadius:8,padding:8}},
                 React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},l),
-                React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},v)
+                React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:0}},estadoDe(p)==="CONFIRMADO"?(v||"—"):"Por verificar")
               )
             )
           ),
+          estadoDe(p)!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"10px 0 0",lineHeight:1.5}},estadoDe(p)==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; confirmar el usuario exacto con el cliente."),
           p.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"10px 0 0",lineHeight:1.5}},p.d)
         ),{key:i})),
-        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en redes"),React.createElement(IL,{items:b2.items_social})))
+        card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en redes"),React.createElement(IL,{items:itemsSocialS})))
       ),
 
       tab==="competidores"&&React.createElement('div',null,
-        b2.referente_top&&card(React.createElement('div',null,
-          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 8px"}},"⭐ Referente a alcanzar"),
+        b2.referente_top&&b2.referente_top.nombre&&card(React.createElement('div',null,
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+            React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"⭐ Referencia de presencia digital"),
+            React.createElement(EstadoBadge,{estado:b2.referente_top.verificado===true?"CONFIRMADO":"REQUIERE_VERIFICACION"})
+          ),
           React.createElement('p',{style:{fontWeight:600,fontSize:14,margin:"0 0 2px",color:NAVY}},`${b2.referente_top.nombre}${b2.referente_top.ciudad?" · "+b2.referente_top.ciudad:""}`),
-          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},b2.referente_top.por_que)
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},sinPromesas(b2.referente_top.por_que)||"Descripción por verificar.")
         ),{border:`1.5px solid ${GOLD}`,background:GOLD+"0d"}),
         card(React.createElement('div',null,
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 14px"}},tipo==="realtor"?"🏆 Realtors de tu zona":"🏆 Competidores del mismo nicho"),
@@ -485,21 +576,21 @@ function App() {
                 React.createElement('p',{style:{fontWeight:600,fontSize:13,margin:0}},c.nombre),
                 React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"2px 0 0"}},`${c.zona} · ${c.nicho}`)
               ),
-              React.createElement('span',{style:{fontSize:11,color:"#9ca3af"}},`📝 ${c.resenas}`)
+              React.createElement('div',{style:{display:"flex",gap:6,alignItems:"center"}},React.createElement('span',{style:{fontSize:11,color:"#9ca3af"}},`📝 ${c.verificado===true?(c.resenas||"—"):"por verificar"}`),React.createElement(EstadoBadge,{estado:c.verificado===true?"CONFIRMADO":"REQUIERE_VERIFICACION"}))
             ),
-            React.createElement('div',{style:{display:"grid",gridTemplateColumns:tipo==="realtor"?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:6,marginBottom:8}},
+            c.verificado===true?React.createElement('div',{style:{display:"grid",gridTemplateColumns:tipo==="realtor"?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr",gap:6,marginBottom:8}},
               (tipo==="realtor"?["web","gmaps","zillow","social"]:["web","gmaps","social"]).map(k=>React.createElement('div',{key:k,style:{background:"#f9fafb",borderRadius:6,padding:"6px 8px"}},
                 React.createElement('p',{style:{fontSize:10,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},k),
-                React.createElement(SB,{score:c.scores?.[k]??0,small:true})
+                React.createElement(SB,{score:num(c.scores?.[k]),small:true})
               ))
-            ),
-            React.createElement('p',{style:{fontSize:12,color:"#16a34a",margin:"0 0 3px"}},`✅ ${c.fortaleza}`),
-            React.createElement('p',{style:{fontSize:12,color:"#dc2626",margin:0}},`⚠️ ${c.debilidad}`)
+            ):React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 8px",lineHeight:1.5}},"Datos no verificados en esta revisión: se muestran como referencia de mercado, no como comparación."),
+            c.fortaleza&&React.createElement('p',{style:{fontSize:12,color:"#16a34a",margin:"0 0 3px"}},`✅ ${sinPromesas(c.fortaleza)}`),
+            c.debilidad&&c.verificado===true&&React.createElement('p',{style:{fontSize:12,color:"#dc2626",margin:0}},`⚠️ ${sinPromesas(c.debilidad)}`)
           ))
         )),
         b2.oportunidades?.length>0&&card(React.createElement('div',null,
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 10px"}},"💡 Oportunidades"),
-          b2.oportunidades.map((o,i)=>React.createElement('p',{key:i,style:{fontSize:13,margin:"0 0 8px",paddingLeft:12,borderLeft:`3px solid ${GOLD}`,lineHeight:1.5,color:"#374151"}},o))
+          sinPromesasLista(b2.oportunidades).map((o,i)=>React.createElement('p',{key:i,style:{fontSize:13,margin:"0 0 8px",paddingLeft:12,borderLeft:`3px solid ${GOLD}`,lineHeight:1.5,color:"#374151"}},o))
         ),{border:`1px solid ${GOLD}50`})
       )
     ),
@@ -514,7 +605,7 @@ function App() {
               React.createElement('p',{style:{fontWeight:500,fontSize:13,margin:"0 0 3px"}},p.titulo),
               React.createElement('span',{style:{fontSize:11,color:"#9ca3af",whiteSpace:"nowrap",marginLeft:8}},p.dias)
             ),
-            React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 6px",lineHeight:1.5}},p.detalle),
+            React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 6px",lineHeight:1.5}},sinPromesas(p.detalle)),
             p.servicio&&React.createElement('span',{style:{fontSize:11,background:"#eff6ff",color:"#2563eb",padding:"2px 10px",borderRadius:10}},p.servicio)
           )
         ))
@@ -570,12 +661,12 @@ function App() {
       card(React.createElement('div',null,
         React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"💬 Mensaje WhatsApp"),
-          React.createElement('button',{onClick:()=>{navigator.clipboard.writeText(b2.mensaje_cierre||"");setCopied(true);setTimeout(()=>setCopied(false),2000);},
+          React.createElement('button',{onClick:()=>{navigator.clipboard.writeText(sinPromesas(b2.mensaje_cierre)||"");setCopied(true);setTimeout(()=>setCopied(false),2000);},
             style:{fontSize:12,padding:"4px 10px",borderRadius:6,border:"1px solid #e5e7eb",background:copied?"#f0fdf4":"#f9fafb",cursor:"pointer",color:copied?"#16a34a":"#6b7280"}},
             copied?"✓ Copiado":"Copiar")
         ),
         React.createElement('div',{style:{background:"#f0fdf4",borderRadius:8,padding:"12px 14px"}},
-          React.createElement('p',{style:{fontSize:13,lineHeight:1.8,margin:0,color:"#14532d",whiteSpace:"pre-wrap"}},b2.mensaje_cierre)
+          React.createElement('p',{style:{fontSize:13,lineHeight:1.8,margin:0,color:"#14532d",whiteSpace:"pre-wrap"}},sinPromesas(b2.mensaje_cierre))
         )
       ))
     ),
@@ -595,25 +686,29 @@ function App() {
             React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"2px 0 14px"}},tipo==="realtor"?`${b1.estado||estadoUbic} · ${b1.ciudad}`:b1.ciudad)
           ),
           React.createElement('div',{style:{display:"flex",alignItems:"center",gap:14,padding:"0 20px 16px"}},
-            React.createElement('div',{style:{width:64,height:64,borderRadius:"50%",background:"#f9fafb",border:`4px solid ${sc(avgScore)}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},
-              React.createElement('span',{style:{fontWeight:800,fontSize:18,color:sc(avgScore)}},avgScore)
+            React.createElement('div',{style:{width:64,height:64,borderRadius:"50%",background:"#f9fafb",border:`4px solid ${certezaOk&&avgScore!==null?sc(avgScore):"#9ca3af"}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},
+              React.createElement('span',{style:{fontWeight:800,fontSize:certezaOk&&avgScore!==null?18:12,color:certezaOk&&avgScore!==null?sc(avgScore):"#6b7280"}},certezaOk&&avgScore!==null?avgScore:"—")
             ),
             React.createElement('div',null,
-              React.createElement('p',{style:{margin:0,fontSize:13,fontWeight:700,color:sc(avgScore)}},`${semaforo.e} ${semaforo.t}`),
-              React.createElement('p',{style:{margin:"2px 0 0",fontSize:11,color:"#9ca3af"}},"Puntuación digital general")
+              React.createElement('p',{style:{margin:0,fontSize:13,fontWeight:700,color:certezaOk&&avgScore!==null?sc(avgScore):"#6b7280"}},`${semaforo.e} ${semaforo.t}`),
+              React.createElement('p',{style:{margin:"2px 0 0",fontSize:11,color:"#9ca3af"}},certezaOk&&avgScore!==null?`Puntuación de lo confirmado (${areasConfirmadas} de ${areasTotal} áreas)`:`Diagnóstico preliminar · ${areasConfirmadas} de ${areasTotal} áreas confirmadas`)
             )
           ),
           topFortalezas.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
             React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#16a34a"}},"✅ Lo que ya haces bien"),
             topFortalezas.map((f,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 4px",color:"#374151",lineHeight:1.4}},`• ${f}`))
           ),
+          areasPorVerificar.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#d97706"}},"⏳ Por verificar contigo"),
+            React.createElement('p',{style:{fontSize:12,margin:0,color:"#374151",lineHeight:1.4}},areasPorVerificar.join(" · "))
+          ),
           topHuecos.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
-            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#dc2626"}},"⚠️ Te está costando clientes"),
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#dc2626"}},"⚠️ Lo confirmado que te está costando clientes"),
             topHuecos.map((h,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 4px",color:"#374151",lineHeight:1.4}},`• ${h.titulo}`))
           ),
           competidorTop&&React.createElement('div',{style:{margin:"0 20px 14px",padding:"10px 12px",background:"#fffbeb",borderRadius:8,borderLeft:`3px solid ${GOLD}`}},
             React.createElement('p',{style:{fontSize:11,fontWeight:700,margin:"0 0 3px",color:"#92400e"}},"📌 Con quién compites"),
-            React.createElement('p',{style:{fontSize:12,margin:0,color:"#78350f",lineHeight:1.4}},`${competidorTop.nombre} (${competidorTop.zona}): ${competidorTop.fortaleza}`)
+            React.createElement('p',{style:{fontSize:12,margin:0,color:"#78350f",lineHeight:1.4}},`${competidorTop.nombre} (${competidorTop.zona}): ${sinPromesas(competidorTop.fortaleza)}`)
           ),
           serviciosKit.length>0&&React.createElement('div',{style:{padding:"0 20px 16px"}},
             React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:NAVY}},"🚀 Por dónde empezamos"),
