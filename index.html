@@ -56,8 +56,99 @@ const REALTOR_DEFAULT_PRICES = {
   "Guía de video (grabación + edición)": 99,
   "Mantenimiento digital mensual": 249,
 };
+
+// ===== Resolución de identidad multiseñal (Diagnóstico Digital Pro · ajuste 2) =====
+const DDP_ID = (() => {
+  const sinAcentos = t => String(t||"").normalize("NFD").replace(/[̀-ͯ]/g,"");
+  const normTel = t => { const d=String(t||"").replace(/\D/g,""); if(d.length===11&&d[0]==="1") return d.slice(1); return d.length===10?d:(d.length>=7?d:""); };
+  const mismoTel = (a,b) => { const x=normTel(a), y=normTel(b); return !!x && !!y && x===y; };
+  const fmtTel = d => { const x=normTel(d); return x.length===10?`(${x.slice(0,3)}) ${x.slice(3,6)}-${x.slice(6)}`:(x||""); };
+  const telVariantes = t => { const x=normTel(t); if(x.length!==10) return []; return [x, fmtTel(x), `${x.slice(0,3)}-${x.slice(3,6)}-${x.slice(6)}`, `+1 ${x.slice(0,3)} ${x.slice(3,6)} ${x.slice(6)}`, `${x.slice(0,3)}.${x.slice(3,6)}.${x.slice(6)}`]; };
+  // Variantes razonables del nombre (sin inventar personas: solo recombinaciones del nombre dado)
+  const variantesNombre = (nombre, ciudad, brokerage) => {
+    const limpio = String(nombre||"").replace(/\s+/g," ").trim(); if(!limpio) return [];
+    const tok = limpio.split(" ").filter(Boolean); const v = new Set([limpio]);
+    const sa = sinAcentos(limpio); v.add(sa);
+    if (tok.length>=3) { v.add(`${tok[0]} ${tok[tok.length-1]}`); v.add(`${tok[0]} ${tok[tok.length-2]}`); v.add(`${tok[0]} ${tok[1]} ${tok[tok.length-2]}`); v.add(`${tok[0]}${tok[1]} ${tok.slice(2).join(" ")}`); v.add(`${tok[0]}${tok[1]} ${tok[tok.length-2]}`); v.add(`${tok[0]}${tok[1]} ${tok[tok.length-1]}`); }
+    if (tok.length===2) { v.add(`${tok[0]}${tok[1]}`); }
+    if (tok.length>=2) { v.add(`${tok[0]} ${tok[tok.length-1]}`); v.add(`${tok[0]}${tok[1]}`); }
+    const base = Array.from(v).map(sinAcentos);
+    const out = new Set(base);
+    base.slice(0,4).forEach(b => { if(ciudad) out.add(`${b} ${ciudad}`); out.add(`${b} Realtor`); out.add(`${b} Real Estate`); if(brokerage) out.add(`${b} ${brokerage}`); });
+    return Array.from(out).filter(x=>x.trim().length>2).slice(0,24);
+  };
+  // Señales: fuertes vs complementarias (clasificación conceptual, no puntaje opaco)
+  const FUERTES = ["telefono","correo","dominio","enlace","direccion","brokerage+telefono","licencia"];
+  const COMPLEMENTARIAS = ["ciudad","actividad","nombre","nombre_parecido","foto","equipo","brokerage","branding"];
+  const normSenal = x => { const t=sinAcentos(String(x||"")).toLowerCase().trim(); if(/broker/.test(t)&&/tel|phone|whats/.test(t)) return "brokerage+telefono"; if(/tel|phone|whats/.test(t)) return "telefono"; if(/correo|email|mail/.test(t)) return "correo"; if(/dominio|domain|sitio|web/.test(t)) return "dominio"; if(/enlace|link|vinculo|linktree|bio/.test(t)) return "enlace"; if(/direcci|address|oficina/.test(t)) return "direccion"; if(/licen|dbpr|trec/.test(t)) return "licencia"; if(/nombre|name/.test(t)) return /parecid|similar|variante|distint|diferen/.test(t)?"nombre_parecido":"nombre"; if(/broker/.test(t)) return "brokerage"; if(/ciudad|zona|city|orlando|area/.test(t)) return "ciudad"; if(/activid|profes|real ?estate|realtor|inmobil/.test(t)) return "actividad"; if(/equipo|team/.test(t)) return "equipo"; if(/foto|imagen|branding|logo/.test(t)) return "foto"; return t; };
+  const esFuerte = c => { const n=normSenal(c); return FUERTES.includes(n); };
+  // Ajuste conservador del estado que declara el modelo, según las señales que él mismo registró
+  const ajustarEstado = (estadoModelo, coincidencias, diferencias, ctx) => {
+    const co=(coincidencias||[]).map(normSenal), di=(diferencias||[]).map(normSenal);
+    let fuertes = co.filter(c=>FUERTES.includes(c));
+    if (co.includes("brokerage") && co.includes("telefono")) fuertes.push("brokerage+telefono");
+    if (ctx && ctx.telefonoCoincide && !fuertes.includes("telefono")) fuertes.push("telefono");
+    const comp = co.filter(c=>COMPLEMENTARIAS.includes(c));
+    const difNombre = di.some(d=>d==="nombre"||d==="nombre_parecido");
+    const difFuerte = di.some(d=>FUERTES.includes(d)); // teléfono/correo/dominio/dirección distintos: pesa en contra
+    const e = estadoModelo;
+    if (e==="NO_LOCALIZADO") return {estado:e, fuertes, comp, motivo:"sin candidato"};
+    if (e==="CONFIRMADO") {
+      if (fuertes.length===0) return {estado: comp.length>=3 ? "COINCIDENCIA_PROBABLE" : "REQUIERE_VERIFICACION", fuertes, comp, motivo:"el modelo confirmó sin una señal fuerte registrada"};
+      if (difNombre && fuertes.length===1) return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:"una sola señal fuerte y el nombre mostrado difiere"};
+      if (difFuerte && fuertes.length<2) return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:"hay un dato de contacto distinto al suministrado"};
+      return {estado:"CONFIRMADO", fuertes, comp, motivo:""};
+    }
+    if (e==="COINCIDENCIA_PROBABLE") {
+      if (fuertes.length===0 && comp.length<3) return {estado:"REQUIERE_VERIFICACION", fuertes, comp, motivo:"solo nombre/ciudad: insuficiente para coincidencia probable"};
+      return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:""};
+    }
+    // REQUIERE_VERIFICACION declarado por el modelo: puede subir a probable solo con señal fuerte explícita
+    if (fuertes.length>=1 && !difNombre && !difFuerte) return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:"señal fuerte registrada"};
+    return {estado:"REQUIERE_VERIFICACION", fuertes, comp, motivo:""};
+  };
+  // Huella de identidad: separa lo suministrado por el consultor de lo encontrado en fuentes públicas
+  const nuevaHuella = (intake) => ({
+    suministrado: { nombre: intake.nombre||"", ciudad: intake.ciudad||"", estado: intake.estado||"", telefono: normTel(intake.telefono)||"", brokerage: intake.brokerage||"", notas: intake.notas||"" },
+    variantes_sugeridas: variantesNombre(intake.nombre, intake.ciudad, intake.brokerage),
+    telefono_variantes: telVariantes(intake.telefono),
+    encontrado: { nombres:[], telefonos:[], correos:[], dominios:[], handles:[], brokerage:[], direcciones:[], equipo:[] },
+    coincide: [], busquedas: []
+  });
+  const push = (arr, v, fuente) => { if(!v) return; const val=String(v).trim(); if(!val || arr.some(x=>x.v.toLowerCase()===val.toLowerCase())) return; arr.push({v:val, fuente:fuente||""}); };
+  const enriquecerHuella = (h, d1) => {
+    const enc = h.encontrado, hf = (d1.huella_encontrada||{});
+    ["nombres","telefonos","correos","dominios","handles","brokerage","direcciones","equipo"].forEach(k => (hf[k]||[]).forEach(x => push(enc[k], typeof x==="string"?x:x.v, typeof x==="string"?"":x.fuente)));
+    (d1.identidad?.nombres_encontrados||[]).forEach(n=>push(enc.nombres,n,"identidad"));
+    (d1.identidad?.telefonos_encontrados||[]).forEach(t=>push(enc.telefonos,t,"identidad"));
+    if (d1.analisis_gmaps?.nombre_perfil) push(enc.nombres, d1.analisis_gmaps.nombre_perfil, "google");
+    if (d1.analisis_zillow?.nombre_perfil) push(enc.nombres, d1.analisis_zillow.nombre_perfil, "zillow");
+    if (/^https?:|www\./i.test(d1.url_encontrada||"")) push(enc.dominios, d1.url_encontrada, "web");
+    if (d1.brokerage) push(enc.brokerage, d1.brokerage, "resultados");
+    h.busquedas = Array.from(new Set([...(h.busquedas||[]), ...(d1.busquedas||[])]));
+    // coincidencias entre lo suministrado y lo encontrado (nunca convierte suministrado en confirmado por sí solo)
+    h.coincide = [];
+    if (h.suministrado.telefono && enc.telefonos.some(t=>mismoTel(t.v,h.suministrado.telefono))) h.coincide.push("telefono");
+    if (h.suministrado.brokerage && enc.brokerage.some(b=>sinAcentos(b.v).toLowerCase().includes(sinAcentos(h.suministrado.brokerage).toLowerCase().split(" ")[0]))) h.coincide.push("brokerage");
+    return h;
+  };
+  const huellaTexto = h => JSON.stringify({
+    SUMINISTRADO_POR_CONSULTOR: h.suministrado,
+    VARIANTES_DE_NOMBRE_A_PROBAR: h.variantes_sugeridas,
+    TELEFONO_FORMATOS_EQUIVALENTES: h.telefono_variantes,
+    ENCONTRADO_EN_FUENTES_PUBLICAS: h.encontrado,
+    COINCIDE_SUMINISTRADO_VS_PUBLICO: h.coincide,
+    VARIANTES_YA_PROBADAS: h.busquedas
+  });
+  return { sinAcentos, normTel, mismoTel, fmtTel, telVariantes, variantesNombre, normSenal, esFuerte, ajustarEstado, nuevaHuella, enriquecerHuella, huellaTexto, FUERTES, COMPLEMENTARIAS };
+})();
+window.DDP_ID = DDP_ID;
+
 const PROTOCOLO = `PROTOCOLO DE BÚSQUEDA (obligatorio ANTES de declarar que un activo no fue localizado): busca con web_search usando variantes razonables — nombre completo; con y sin segundo apellido; nombre unido y separado (ej. "Marialejandra" / "Maria Alejandra"); nombre + ciudad; nombre + Realtor; nombre + Real Estate; nombre + brokerage si se conoce; teléfono si está disponible; y toda clave nueva que aporte un activo ya confirmado (usuario de Instagram, nombre exacto de la ficha de Google, teléfono o correo visto en un directorio, nombre de equipo). Un activo encontrado da claves para buscar los demás. Registra las variantes usadas en "busquedas".
-ESTADOS DE CERTEZA (cada activo lleva "estado"): "CONFIRMADO" = evidencia suficiente (perfil/URL visto); "REQUIERE_VERIFICACION" = hay información pero no se puede concluir (perfil sin reclamar, datos contradictorios, nombre distinto); "NO_LOCALIZADO" = las búsquedas realizadas no lo localizaron, lo cual NO significa que no exista. PROHIBIDO convertir NO_LOCALIZADO en "no existe", "ausente", "sin perfil", "0 reseñas", "inactivo" o "incumplimiento". Si el estado no es CONFIRMADO: score = null, cantidades de reseñas/seguidores = null, y los items dicen "no localizado en la revisión inicial — confirmar con el cliente (URL, usuario o teléfono) y repetir la búsqueda". En "evidencia" pon la URL o fuente vista; si no la viste, "".
+RESOLUCIÓN DE IDENTIDAD MULTISEÑAL: el nombre es UNA señal, no la única ni la más fuerte. Construye una huella del agente y úsala en cadena: entrada (nombre + ciudad + teléfono opcional + brokerage si lo hay) → buscar candidatos con las VARIANTES_DE_NOMBRE_A_PROBAR y con el teléfono en sus FORMATOS_EQUIVALENTES → extraer señales de cada candidato (nombre mostrado, teléfono, correo, dominio, dirección, brokerage, handles, nombre de equipo, enlaces a otras plataformas) → reutilizar esas señales para buscar Google Business, web, Zillow, Realtor.com, Facebook, Instagram y directorios → comparar candidatos → asignar estado. Un candidato con nombre distinto pero teléfono/correo/dominio/enlace igual ES el mismo agente; dos perfiles con nombre parecido y nada más NO lo son.
+SEÑALES FUERTES: mismo teléfono; mismo correo; mismo dominio/sitio; enlace directo entre plataformas (bio, Linktree, "sitio web" de la ficha); brokerage + teléfono; dirección profesional coincidente; licencia. SEÑALES COMPLEMENTARIAS: ciudad/zona; actividad inmobiliaria; nombre parecido; nombre de equipo; foto/branding verificable. Cada activo devuelve "coincidencias" y "diferencias" con esas etiquetas (ej. ["telefono","ciudad","actividad"] / ["nombre mostrado"]) y "evidencia" con la URL/fuente: la asociación se justifica con evidencia, no con un puntaje.
+ESTADOS DE CERTEZA (cada activo lleva "estado"): "CONFIRMADO" = al menos una señal FUERTE (o enlace directo desde un activo ya confirmado) y sin diferencias relevantes; "COINCIDENCIA_PROBABLE" = varias señales coinciden (al menos una fuerte, o ciudad + actividad + brokerage + nombre parecido) pero queda una diferencia relevante que el consultor/cliente debe confirmar (típico: nombre mostrado distinto, brokerage no visible); "REQUIERE_VERIFICACION" = hay un candidato o información relacionada pero la evidencia es insuficiente (solo nombre parecido + ciudad); "NO_LOCALIZADO" = tras las búsquedas razonables no apareció un candidato suficientemente relacionado, lo cual NO significa que no exista. Nombre parecido + ciudad NUNCA sube solos a COINCIDENCIA_PROBABLE ni a CONFIRMADO.
+DATOS SUMINISTRADOS: lo que da el consultor (teléfono, brokerage, notas) son PISTAS para buscar y cruzar; un dato suministrado no convierte un activo en CONFIRMADO. Distingue en la huella: suministrado por consultor / encontrado en fuente pública / coincidencia entre ambos. Nunca muestres ni inventes teléfonos, correos o direcciones que no hayan sido suministrados o vistos en evidencia. PROHIBIDO convertir NO_LOCALIZADO en "no existe", "ausente", "sin perfil", "0 reseñas", "inactivo" o "incumplimiento". Si el estado no es CONFIRMADO: score = null, cantidades de reseñas/seguidores = null; para COINCIDENCIA_PROBABLE los items dicen "coincidencia probable — confirmar identidad con el cliente" y describen el candidato; para NO_LOCALIZADO dicen "no localizado en la revisión inicial — confirmar con el cliente (URL, usuario o teléfono) y repetir la búsqueda". En "evidencia" pon la URL o fuente vista; si no la viste, "".
 CUMPLIMIENTO: marca "incumplimiento" SOLO con evidencia visible en un activo confirmado (ej. el sitio muestra el teléfono sin el nombre del brokerage). Si solo falta información o no localizaste el registro TREC/DBPR del agente, usa exactamente: "Información TREC/FREC-DBPR pendiente de verificación" con estado REQUIERE_VERIFICACION. Un registro de licencia no localizado NO es falta de licencia.
 IDENTIDAD: registra TODAS las formas del nombre que veas en las plataformas en identidad.nombres_encontrados (y teléfonos en telefonos_encontrados). Si difieren, nap_inconsistente=true y recomienda verificar primero el nombre profesional/licenciado correcto con el agente; NO decidas tú cuál debe usarse.
 AFIRMACIONES: cifras (seguidores, ventas, reseñas, ratings, años, premios) solo si las viste; de lo contrario null o "por verificar". Nada de promesas de resultado: prohibido "#1", "número 1", "posicionarte como", "superar a", "garantizado".
@@ -71,11 +162,12 @@ Detalles máximo 10 palabras cada uno.
 "busquedas":["variantes de búsqueda usadas"],
 "identidad":{"nombres_encontrados":["forma 1","forma 2"],"telefonos_encontrados":[],"nap_inconsistente":false,"d":"qué difiere entre plataformas"},
 "cumplimiento":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","d":"evidencia o 'Información TREC/FREC-DBPR pendiente de verificación'"},
+"huella_encontrada":{"nombres":[{"v":"","fuente":""}],"telefonos":[{"v":"","fuente":""}],"correos":[],"dominios":[],"handles":[],"brokerage":[],"direcciones":[],"equipo":[]},
 "scores_web":0,"scores_gmaps":0,"scores_zillow":0,"scores_directorios":0,
-"analisis_web":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
-"analisis_gmaps":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
-"analisis_zillow":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","v":"Completo/Parcial/Por verificar","d":""}},
-"analisis_directorios":{"homes_com":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
+"analisis_web":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_zillow":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"v":"Completo/Parcial/Por verificar","d":""}},
+"analisis_directorios":{"homes_com":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_zillow":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
@@ -89,7 +181,7 @@ Investiga WhatsApp Business, Instagram, Facebook y realtors competidores del MIS
 Detalles máximo 10 palabras.
 
 {"scores_social":0,
-"social":[{"red":"WhatsApp Business","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"Con catálogo/Sin catálogo/Por verificar","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"Facebook","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"TikTok","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
+"social":[{"red":"WhatsApp Business","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"Con catálogo/Sin catálogo/Por verificar","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"Facebook","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"TikTok","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "competidores":[{"nombre":"","zona":"","nicho":"Realtor","verificado":false,"evidencia":"","scores":{"web":null,"gmaps":null,"zillow":null,"social":null},"resenas":"por verificar","fortaleza":"","debilidad":""}],
 "referente_top":{"nombre":"","ciudad":"","verificado":false,"evidencia":"","por_que":"1 oración descriptiva de lo que hace bien (sin promesas ni metas de superar a nadie)"},
@@ -109,9 +201,10 @@ Detalles máximo 10 palabras cada uno.
 {"nombre":"","tipo":"","ciudad":"","url_encontrada":"url o No localizado","resumen":"2 oraciones cortas con datos reales; distingue lo confirmado de lo pendiente",
 "busquedas":["variantes de búsqueda usadas"],
 "identidad":{"nombres_encontrados":["forma 1"],"telefonos_encontrados":[],"nap_inconsistente":false,"d":""},
+"huella_encontrada":{"nombres":[],"telefonos":[],"correos":[],"dominios":[],"handles":[],"brokerage":[],"direcciones":[],"equipo":[]},
 "scores_web":0,"scores_gmaps":0,
-"analisis_web":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
-"analisis_gmaps":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_web":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "fortalezas":["f1","f2"]}
@@ -122,7 +215,7 @@ Investiga redes sociales y competidores del MISMO NICHO. Responde SOLO con JSON 
 Detalles máximo 10 palabras.
 
 {"scores_social":0,"scores_ads":0,
-"social":[{"red":"Instagram","estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
+"social":[{"red":"Instagram","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "competidores":[{"nombre":"","zona":"","nicho":"","verificado":false,"evidencia":"","scores":{"web":null,"gmaps":null,"social":null},"resenas":"por verificar","fortaleza":"","debilidad":""}],
 "oportunidades":["o1","o2","o3"],
@@ -177,6 +270,10 @@ function App() {
   const [tipo, setTipo] = useState("negocio");
   const [estadoUbic, setEstadoUbic] = useState("Texas");
   const [negocio, setNegocio] = useState("");
+  const [agente, setAgente] = useState("");
+  const [ciudad, setCiudad] = useState("");
+  const [telefono, setTelefono] = useState("");
+  const [huella, setHuella] = useState(null);
   const [notas, setNotas] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
@@ -198,27 +295,33 @@ function App() {
 
   const inp = { width:"100%", padding:"10px 12px", borderRadius:8, border:"1px solid #d1d5db", background:"#f9fafb", color:"#111827", fontSize:14, outline:"none" };
 
+  const listo = tipo==="realtor" ? (agente.trim() && ciudad.trim()) : negocio.trim();
   const analyze = async () => {
-    if (!negocio.trim()) return;
+    if (!listo) return;
     setLoading(true); setError(null); setB1(null); setB2(null);
     const isRealtor = tipo === "realtor";
+    const brokerageNotas = (notas.match(/broker(?:age)?\s*:\s*([^\n;,.]+)/i)||[])[1]?.trim()||"";
+    const h = DDP_ID.nuevaHuella(isRealtor ? {nombre:agente, ciudad, estado:estadoUbic, telefono, brokerage:brokerageNotas, notas} : {nombre:negocio, ciudad:"", estado:"Texas", telefono:"", brokerage:"", notas});
+    setHuella(h);
     const base = isRealtor
-      ? `Agente: ${negocio}\nEstado: ${estadoUbic}\nNotas: ${notas||"Sin notas"}`
-      : `Negocio: ${negocio}\nNotas: ${notas||"Sin notas"}`;
+      ? `Agente: ${agente.trim()}\nCiudad/zona: ${ciudad.trim()}\nEstado: ${estadoUbic}\nTeléfono suministrado por el consultor: ${telefono.trim()?DDP_ID.fmtTel(telefono)+" (formatos equivalentes: "+h.telefono_variantes.join(" | ")+")":"no suministrado"}\nNotas de campo (pistas, no verdades): ${notas||"Sin notas"}\nHUELLA_DE_IDENTIDAD: ${DDP_ID.huellaTexto(h)}`
+      : `Negocio: ${negocio}\nNotas: ${notas||"Sin notas"}\nHUELLA_DE_IDENTIDAD: ${DDP_ID.huellaTexto(h)}`;
     try {
       setLoadMsg(isRealtor ? "🔍 Analizando web, Google Business y Zillow..." : "🔍 Analizando web y Google Maps...");
       const d1 = await callAPI(isRealtor ? SYSTEM_R1 : SYSTEM_B1, base);
       setB1(d1);
       setLoadMsg(isRealtor ? "📱 Analizando redes, WhatsApp y competidores..." : "📱 Analizando redes y competidores...");
+      const h2 = DDP_ID.enriquecerHuella(h, d1); setHuella({...h2});
       const claves = [
         `Nombre: ${d1.nombre}`, `Ciudad: ${d1.ciudad}`, `URL: ${d1.url_encontrada}`,
-        d1.brokerage ? `Brokerage: ${d1.brokerage}` : "",
-        d1.identidad?.nombres_encontrados?.length ? `Formas del nombre ya vistas: ${d1.identidad.nombres_encontrados.join(" | ")}` : "",
-        d1.identidad?.telefonos_encontrados?.length ? `Teléfonos vistos: ${d1.identidad.telefonos_encontrados.join(", ")}` : "",
+        d1.brokerage ? `Brokerage visto en resultados: ${d1.brokerage}` : "",
         d1.analisis_gmaps?.nombre_perfil ? `Nombre de la ficha de Google: ${d1.analisis_gmaps.nombre_perfil}` : "",
-        d1.busquedas?.length ? `Variantes ya probadas: ${d1.busquedas.join("; ")}` : "",
+        h2.encontrado.nombres.length ? `Formas del nombre ya vistas: ${h2.encontrado.nombres.map(x=>x.v).join(" | ")}` : "",
+        h2.encontrado.telefonos.length ? `Teléfonos vistos en fuentes públicas: ${h2.encontrado.telefonos.map(x=>x.v+(x.fuente?" ("+x.fuente+")":"")).join(" | ")}` : "",
+        h2.busquedas.length ? `Variantes ya probadas: ${h2.busquedas.join("; ")}` : "",
+        `HUELLA_DE_IDENTIDAD (estructurada, paso 1 → paso 2): ${DDP_ID.huellaTexto(h2)}`,
       ].filter(Boolean).join("\n");
-      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa estas claves como variantes de búsqueda antes de declarar cualquier red como no localizada.`);
+      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa la huella completa (nombres vistos, teléfonos, dominios, handles, brokerage, equipo) como claves de búsqueda y de comparación antes de declarar cualquier red como no localizada; registra coincidencias y diferencias por activo.`);
       setB2(d2);
       setStep("report");
     } catch(e) { setError("Error: "+e.message); }
@@ -227,9 +330,22 @@ function App() {
 
 
   // ---------- Certeza: estados, saneamiento y puntuación prudente ----------
-  const EST = { CONFIRMADO:{l:"✓ Confirmado",c:"#16a34a",bg:"#f0fdf4"}, REQUIERE_VERIFICACION:{l:"⏳ Requiere verificación",c:"#d97706",bg:"#fffbeb"}, NO_LOCALIZADO:{l:"🔎 No localizado en la revisión inicial",c:"#6b7280",bg:"#f3f4f6"} };
+  const EST = { CONFIRMADO:{l:"✓ Confirmado",c:"#16a34a",bg:"#f0fdf4"}, COINCIDENCIA_PROBABLE:{l:"≈ Coincidencia probable · confirmar identidad",c:"#2563eb",bg:"#eff6ff"}, REQUIERE_VERIFICACION:{l:"⏳ Requiere verificación",c:"#d97706",bg:"#fffbeb"}, NO_LOCALIZADO:{l:"🔎 No localizado en la revisión inicial",c:"#6b7280",bg:"#f3f4f6"} };
   const normEstado = v => { const k=String(v||"").toUpperCase().replace(/\s+/g,"_").replace("VERIFICACIÓN","VERIFICACION"); return EST[k]?k:null; };
-  const estadoDe = obj => { if(!obj) return "NO_LOCALIZADO"; const e=normEstado(obj.estado); if(e) return e; if(obj.encontrado===false) return "NO_LOCALIZADO"; if(obj.encontrado===true) return "CONFIRMADO"; return "REQUIERE_VERIFICACION"; };
+  const telSuministrado = huella?.suministrado?.telefono||"";
+  const telefonoCoincideEn = obj => { if(!telSuministrado||!obj) return false; const cand=[obj.telefono,obj.contacto?.telefono,obj.contacto?.d,obj.d].filter(x=>typeof x==="string"); return cand.some(x=>DDP_ID.mismoTel(x,telSuministrado)); };
+  const estadoBruto = obj => { if(!obj) return "NO_LOCALIZADO"; const e=normEstado(obj.estado); if(e) return e; if(obj.encontrado===false) return "NO_LOCALIZADO"; if(obj.encontrado===true) return "CONFIRMADO"; return "REQUIERE_VERIFICACION"; };
+  // Estado ajustado: el modelo propone, las señales registradas deciden (sin puntaje opaco)
+  const resolver = obj => { const bruto=estadoBruto(obj); if(!obj) return {estado:bruto,fuertes:[],comp:[],motivo:""}; const tieneSenales=Array.isArray(obj.coincidencias)||Array.isArray(obj.diferencias); if(!tieneSenales) return {estado:bruto,fuertes:[],comp:[],motivo:"sin señales registradas (esquema anterior)"}; return DDP_ID.ajustarEstado(bruto, obj.coincidencias, obj.diferencias, {telefonoCoincide: telefonoCoincideEn(obj)}); };
+  const estadoDe = obj => resolver(obj).estado;
+  const Senales = ({obj}) => { if(!obj||(!obj.coincidencias&&!obj.diferencias)) return null; const r=resolver(obj); const co=(obj.coincidencias||[]), di=(obj.diferencias||[]); if(!co.length&&!di.length) return null;
+    return React.createElement('div',{style:{marginTop:8,padding:"8px 10px",background:"#f9fafb",borderRadius:8,fontSize:12,lineHeight:1.6}},
+      co.map((c,i)=>React.createElement('div',{key:"c"+i,style:{color:"#16a34a"}},`✓ ${c}${DDP_ID.esFuerte(c)?" (señal fuerte)":""}`)),
+      di.map((d,i)=>React.createElement('div',{key:"d"+i,style:{color:"#d97706"}},`⚠ ${d}`)),
+      r.estado==="COINCIDENCIA_PROBABLE"&&React.createElement('div',{style:{color:"#2563eb",fontWeight:600}},"→ Confirmar identidad con el cliente"),
+      r.motivo&&React.createElement('div',{style:{color:"#6b7280"}},`Ajuste: ${r.motivo}`),
+      obj.evidencia&&React.createElement('div',{style:{color:"#9ca3af"}},`Evidencia: ${obj.evidencia}`)
+    ); };
   const EstadoBadge = ({estado}) => { const e=EST[estado]||EST.REQUIERE_VERIFICACION; return React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:10,background:e.bg,color:e.c,fontWeight:500,whiteSpace:"nowrap"}},e.l); };
   const NO_LOC_NOTA = "No localizado durante la revisión inicial: no equivale a que no exista. Confirmar con el cliente (URL, usuario o teléfono) y repetir la búsqueda.";
   const PROMESA = /(#\s?1\b|n[úu]mero\s*1\b|posicionarte como|posicionarse como|superar a\b|superar al\b|garantiz)/i;
@@ -239,7 +355,7 @@ function App() {
   // Items de un área: si el activo no está confirmado, no se admiten conclusiones de ausencia.
   const itemsSeguros = (items, estado) => {
     if(estado==="CONFIRMADO") return items||[];
-    const base = [{status:"mejorable",titulo: estado==="NO_LOCALIZADO"?"No localizado durante la revisión inicial":"Requiere verificación",detalle: estado==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; confirmar con el cliente antes de actuar.",tipo:"pendiente"}];
+    const base = [{status:"mejorable",titulo: estado==="NO_LOCALIZADO"?"No localizado durante la revisión inicial":estado==="COINCIDENCIA_PROBABLE"?"Coincidencia probable — confirmar identidad":"Requiere verificación",detalle: estado==="NO_LOCALIZADO"?NO_LOC_NOTA:estado==="COINCIDENCIA_PROBABLE"?"Varias señales coinciden pero queda una diferencia relevante; el consultor confirma con el cliente antes de actuar.":"Hay información pero no se puede concluir; confirmar con el cliente antes de actuar.",tipo:"pendiente"}];
     const resto=(items||[]).filter(it=>!AUSENCIA.test((it.titulo||"")+" "+(it.detalle||""))).map(it=>({...it,status:it.status==="critico"?"mejorable":it.status}));
     return base.concat(resto);
   };
@@ -272,9 +388,9 @@ function App() {
   const estGmaps = estadoDe(b1?.analisis_gmaps);
   const estZillow = estadoDe(b1?.analisis_zillow);
   const dirEst = b1?.analisis_directorios ? Object.values(b1.analisis_directorios).map(estadoDe) : [];
-  const estDir = dirEst.includes("CONFIRMADO")?"CONFIRMADO":dirEst.includes("REQUIERE_VERIFICACION")?"REQUIERE_VERIFICACION":"NO_LOCALIZADO";
+  const estDir = dirEst.includes("CONFIRMADO")?"CONFIRMADO":dirEst.includes("COINCIDENCIA_PROBABLE")?"COINCIDENCIA_PROBABLE":dirEst.includes("REQUIERE_VERIFICACION")?"REQUIERE_VERIFICACION":"NO_LOCALIZADO";
   const socEst = (b2?.social||[]).map(estadoDe);
-  const estSocial = socEst.includes("CONFIRMADO")?"CONFIRMADO":socEst.includes("REQUIERE_VERIFICACION")?"REQUIERE_VERIFICACION":"NO_LOCALIZADO";
+  const estSocial = socEst.includes("CONFIRMADO")?"CONFIRMADO":socEst.includes("COINCIDENCIA_PROBABLE")?"COINCIDENCIA_PROBABLE":socEst.includes("REQUIERE_VERIFICACION")?"REQUIERE_VERIFICACION":"NO_LOCALIZADO";
   const areaEstados = tipo==="realtor" ? {web:estWeb,gmaps:estGmaps,zillow:estZillow,directorios:estDir,social:estSocial} : {web:estWeb,gmaps:estGmaps,social:estSocial,ads:"CONFIRMADO"};
   const num = v => (v===null||v===undefined||isNaN(Number(v))) ? null : Number(v);
   const conCerteza = (v,est) => est==="CONFIRMADO" ? num(v) : null;
@@ -283,7 +399,9 @@ function App() {
     : {web:conCerteza(b1?.scores_web,estWeb),gmaps:conCerteza(b1?.scores_gmaps,estGmaps),social:conCerteza(b2?.scores_social,estSocial),ads:num(b2?.scores_ads)};
   const areasTotal = Object.keys(scores).length;
   const areasConfirmadas = Object.values(scores).filter(v=>v!==null).length;
+  const areasProbables = Object.values(areaEstados).filter(e=>e==="COINCIDENCIA_PROBABLE").length;
   const pendientes = Object.entries(areaEstados).filter(([k,e])=>e!=="CONFIRMADO");
+  const necesitaProbable = "confirmar con el cliente que el perfil encontrado es suyo (ver señales)";
   const necesita = { web:"URL del sitio web (si existe)", gmaps:"nombre exacto de la ficha de Google Business o enlace de Maps", zillow:"enlace del perfil de Zillow y de Realtor.com", directorios:"enlaces de Homes.com / MapQuest / Yelp si los tiene", social:"usuarios exactos de Instagram, Facebook y TikTok; número de WhatsApp Business", ads:"" };
   const totalPlan = b2?.plan?.reduce((acc,p)=>acc+(prices[p.servicio]||0),0)||0;
 
@@ -310,17 +428,27 @@ function App() {
             style:{flex:1,padding:"8px 0",borderRadius:8,fontWeight:500,fontSize:13,cursor:"pointer",border:estadoUbic===e?`1.5px solid ${NAVY}`:"1px solid #e5e7eb",background:estadoUbic===e?"#eff6ff":"#f9fafb",color:estadoUbic===e?NAVY:"#6b7280"}},e))
         )
       ),
-      React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},tipo==="realtor"?"Nombre del agente + zona/ciudad *":"Nombre del negocio, URL o ambos *"),
-      React.createElement('input',{value:negocio,onChange:e=>setNegocio(e.target.value),placeholder:tipo==="realtor"?"Ej: María López, Realtor en Kissimmee FL":"Ej: Mao's Bakery, Houston TX  —  o  —  www.maosbakery.com",style:{...inp,marginBottom:16}}),
+      tipo==="realtor"?React.createElement('div',null,
+        React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Nombre del agente *"),
+        React.createElement('input',{value:agente,onChange:e=>setAgente(e.target.value),placeholder:"Ej: Maria Alejandra Perez Seiva",style:{...inp,marginBottom:12}}),
+        React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Ciudad / zona *"),
+        React.createElement('input',{value:ciudad,onChange:e=>setCiudad(e.target.value),placeholder:"Ej: Orlando",style:{...inp,marginBottom:12}}),
+        React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Teléfono ",React.createElement('span',{style:{color:"#9ca3af"}},"(opcional, recomendado)")),
+        React.createElement('input',{value:telefono,onChange:e=>setTelefono(e.target.value),inputMode:"tel",placeholder:"Ej: (786) 328-2950",style:{...inp,marginBottom:4}}),
+        React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 16px"}},telefono.trim()?(DDP_ID.normTel(telefono).length===10?`Se usará como señal de identidad: ${DDP_ID.fmtTel(telefono)}`:"Formato no reconocido: se usará tal cual como pista"):"Si lo tienes, el teléfono es la señal más fuerte para relacionar perfiles con nombres distintos.")
+      ):React.createElement('div',null,
+        React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Nombre del negocio, URL o ambos *"),
+        React.createElement('input',{value:negocio,onChange:e=>setNegocio(e.target.value),placeholder:"Ej: Mao's Bakery, Houston TX  —  o  —  www.maosbakery.com",style:{...inp,marginBottom:16}})
+      ),
       React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Notas de campo ",React.createElement('span',{style:{color:"#9ca3af"}},"(opcional)")),
-      React.createElement('textarea',{value:notas,onChange:e=>setNotas(e.target.value),rows:3,placeholder:"Ej: Local bien presentado, atienden en español, clientes por referidos...",style:{...inp,resize:"vertical"}}),
+      React.createElement('textarea',{value:notas,onChange:e=>setNotas(e.target.value),rows:3,placeholder:tipo==="realtor"?"Pistas (no verdades): Brokerage: Empire Network Realty; usa nombre de equipo; atiende en español...":"Ej: Local bien presentado, atienden en español, clientes por referidos...",style:{...inp,resize:"vertical"}}),
       React.createElement('div',{style:{marginTop:12,padding:"10px 14px",background:"#eff6ff",borderRadius:8,borderLeft:"3px solid #2563eb"}},
         React.createElement('p',{style:{fontSize:12,color:"#2563eb",margin:0}},tipo==="realtor"?"💡 Análisis en 2 pasos: web + Google Business + Zillow, luego redes + WhatsApp + competidores.":"💡 Análisis en 2 pasos: web + Google Maps, luego redes + competidores.")
       ),
       error&&React.createElement('div',{style:{marginTop:10,padding:"10px 14px",background:"#fef2f2",borderRadius:8,border:"1px solid #fecaca"}},
         React.createElement('p',{style:{color:"#dc2626",fontSize:13,margin:0}},error)),
-      React.createElement('button',{onClick:analyze,disabled:loading||!negocio.trim(),
-        style:{marginTop:14,width:"100%",padding:"13px 0",borderRadius:8,border:"none",background:loading||!negocio.trim()?"#9ca3af":NAVY,color:GOLD,fontWeight:700,fontSize:15,cursor:loading||!negocio.trim()?"not-allowed":"pointer"}},
+      React.createElement('button',{onClick:analyze,disabled:loading||!listo,
+        style:{marginTop:14,width:"100%",padding:"13px 0",borderRadius:8,border:"none",background:loading||!listo?"#9ca3af":NAVY,color:GOLD,fontWeight:700,fontSize:15,cursor:loading||!listo?"not-allowed":"pointer"}},
         loading?"⏳ Analizando...":"🚀 Generar diagnóstico completo"),
       loading&&React.createElement('div',{style:{marginTop:14,padding:"14px 16px",background:"#f9fafb",borderRadius:8,border:"1px solid #e5e7eb"}},
         React.createElement('div',{style:{display:"flex",alignItems:"center",gap:10,marginBottom:10}},
@@ -377,9 +505,9 @@ function App() {
     React.createElement('div',{style:{background:NAVY,borderRadius:12,padding:"1rem 1.25rem",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}},
       React.createElement('div',null,
         React.createElement('p',{style:{color:GOLD,fontWeight:700,fontSize:15,margin:0}},b1.nombre),
-        React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:"2px 0 0"}},`${b1.tipo} · ${b1.ciudad} · preliminar: ${areasConfirmadas}/${areasTotal} áreas confirmadas`)
+        React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:"2px 0 0"}},`${b1.tipo} · ${b1.ciudad} · preliminar: ${areasConfirmadas}/${areasTotal} áreas confirmadas${areasProbables?` · ${areasProbables} probable${areasProbables>1?"s":""}`:""}`)
       ),
-      React.createElement('button',{onClick:()=>{setStep("intake");setB1(null);setB2(null);setNegocio("");setNotas("");},
+      React.createElement('button',{onClick:()=>{setStep("intake");setB1(null);setB2(null);setNegocio("");setAgente("");setCiudad("");setTelefono("");setNotas("");setHuella(null);},
         style:{background:"transparent",border:"1px solid #8FA8C8",color:"#8FA8C8",borderRadius:6,padding:"4px 12px",fontSize:12,cursor:"pointer"}},"Nuevo")
     ),
 
@@ -402,22 +530,32 @@ function App() {
         card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}},
             React.createElement('p',{style:{fontWeight:600,fontSize:14,margin:0}},"Diagnóstico preliminar"),
-            React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:10,background:certezaOk?"#f0fdf4":"#fffbeb",color:certezaOk?"#16a34a":"#d97706",fontWeight:500}},`${areasConfirmadas} de ${areasTotal} áreas confirmadas`)
+            React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:10,background:certezaOk?"#f0fdf4":"#fffbeb",color:certezaOk?"#16a34a":"#d97706",fontWeight:500}},`${areasConfirmadas} de ${areasTotal} áreas confirmadas${areasProbables?` · ${areasProbables} probable${areasProbables>1?"s":""}`:""}`)
           ),
-          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.6}},"Las áreas no confirmadas no puntúan ni se cuentan como ausentes: primero se verifican con el cliente. La puntuación general se calcula solo con lo confirmado.")
+          React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.6}},"Las áreas no confirmadas no puntúan ni se cuentan como ausentes: primero se verifican con el cliente. Una coincidencia probable es un perfil relacionado por varias señales que el consultor debe confirmar. La puntuación general se calcula solo con lo confirmado.")
         ),{background:"#f9fafb"}),
         card(React.createElement('p',{style:{fontSize:13,color:"#374151",lineHeight:1.7,margin:0}},sinPromesas(b1.resumen)),{background:"#f9fafb"}),
         pendientes.length>0&&card(React.createElement('div',null,
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 8px"}},"🔎 Para concluir la verificación necesitamos"),
-          pendientes.map(([k,e])=>necesita[k]&&React.createElement('div',{key:k,style:{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}},
+          pendientes.map(([k,e])=>necesita[k]&&React.createElement('div',{key:k,style:{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-start",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}},
             React.createElement(EstadoBadge,{estado:e}),
-            React.createElement('p',{style:{fontSize:12,color:"#374151",margin:0,lineHeight:1.5}},`${(tipo==="realtor"?REALTOR_AREAS:AREAS).find(a=>a.key===k)?.label||k}: ${necesita[k]}`)
+            React.createElement('p',{style:{fontSize:12,color:"#374151",margin:0,lineHeight:1.5}},`${(tipo==="realtor"?REALTOR_AREAS:AREAS).find(a=>a.key===k)?.label||k}: ${e==="COINCIDENCIA_PROBABLE"?necesitaProbable:necesita[k]}`)
           ))
         ),{border:"1px solid #fde68a",background:"#fffbeb"}),
         napInconsistente&&card(React.createElement('div',null,
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 6px"}},"🪪 Identidad digital: formas del nombre encontradas"),
           React.createElement('div',{style:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}},nombresVistos.map((n,i)=>React.createElement('span',{key:i,style:{fontSize:12,background:NAVY+"12",color:NAVY,padding:"3px 10px",borderRadius:20}},n))),
           React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,lineHeight:1.5}},(identidad.d?identidad.d+" ":"")+"Antes de corregir cualquier perfil, verificar con el agente cuál es su nombre profesional/licenciado correcto; el diagnóstico no decide cuál usar.")
+        )),
+        huella&&card(React.createElement('div',null,
+          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 6px"}},"🧩 Huella de identidad"),
+          React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},"Suministrado por el consultor (pistas)"),
+          React.createElement('p',{style:{fontSize:12,color:"#374151",margin:"0 0 8px",lineHeight:1.5}},[huella.suministrado.nombre,huella.suministrado.ciudad,huella.suministrado.telefono?DDP_ID.fmtTel(huella.suministrado.telefono):"",huella.suministrado.brokerage].filter(Boolean).join(" · ")||"—"),
+          React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},"Encontrado en fuentes públicas"),
+          React.createElement('p',{style:{fontSize:12,color:"#374151",margin:"0 0 8px",lineHeight:1.5}},Object.entries(huella.encontrado).filter(([k,arr])=>arr.length).map(([k,arr])=>`${k}: `+arr.map(x=>x.v+(x.fuente?` (${x.fuente})`:"")).join(", ")).join(" · ")||"nada registrado aún"),
+          React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},"Coincide suministrado ↔ público"),
+          React.createElement('p',{style:{fontSize:12,color:huella.coincide.length?"#16a34a":"#6b7280",margin:0}},huella.coincide.length?huella.coincide.map(c=>"✓ "+c).join("  "):"sin coincidencias registradas todavía"),
+          huella.busquedas.length>0&&React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"8px 0 0"}},`Variantes probadas: ${huella.busquedas.join("; ")}`)
         )),
         tipo==="realtor"&&card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
@@ -443,8 +581,12 @@ function App() {
 
       tab==="web"&&b1.analisis_web&&React.createElement('div',null,
         card(React.createElement('div',null,
-          React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 4px"}},"🌐 Sitio Web"),
-          React.createElement('p',{style:{fontSize:12,color:"#9ca3af",margin:"0 0 14px"}},b1.analisis_web.url),
+          React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+            React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:0}},"🌐 Sitio Web"),
+            React.createElement(EstadoBadge,{estado:estWeb})
+          ),
+          React.createElement('p',{style:{fontSize:12,color:"#9ca3af",margin:"0 0 8px"}},b1.analisis_web.url),
+          React.createElement(Senales,{obj:b1.analisis_web}),
           [["Mensaje",b1.analisis_web.mensaje_principal],["Diseño",b1.analisis_web.diseno],["Velocidad",b1.analisis_web.velocidad],["Contacto",b1.analisis_web.contacto],["SEO",b1.analisis_web.seo],["Mobile",b1.analisis_web.mobile]].map(([lbl,obj],i,arr)=>obj&&
             React.createElement('div',{key:lbl,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<arr.length-1?"1px solid #f3f4f6":"none"}},
               React.createElement('div',{style:{flex:1,paddingRight:10}},
@@ -479,7 +621,8 @@ function App() {
               React.createElement(Tag,{valor:obj.v})
             )
           ),
-          estGmaps!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"6px 0 0",lineHeight:1.5}},estGmaps==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; las cifras se muestran solo cuando el perfil esté confirmado."),
+          React.createElement(Senales,{obj:b1.analisis_gmaps}),
+          estGmaps!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"6px 0 0",lineHeight:1.5}},estGmaps==="NO_LOCALIZADO"?NO_LOC_NOTA:estGmaps==="COINCIDENCIA_PROBABLE"?"Perfil relacionado por varias señales; confirmar con el cliente que es suyo antes de usar sus cifras.":"Hay información pero no se puede concluir; las cifras se muestran solo cuando el perfil esté confirmado."),
           estGmaps==="CONFIRMADO"&&b1.analisis_gmaps.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
             React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 6px"}},"Reseñas"),
             React.createElement('div',{style:{display:"flex",gap:16}},
@@ -507,7 +650,9 @@ function App() {
               obj.v&&React.createElement(Tag,{valor:obj.v})
             )
           ),
-          estZillow!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"6px 0 0",lineHeight:1.5}},estZillow==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; las cifras se muestran solo cuando el perfil esté confirmado."),
+          React.createElement(Senales,{obj:b1.analisis_zillow}),
+          b1.analisis_zillow.realtor_com&&b1.analisis_zillow.realtor_com.coincidencias&&React.createElement('div',null,React.createElement('p',{style:{fontSize:12,fontWeight:500,margin:"8px 0 0"}},"Realtor.com"),React.createElement(Senales,{obj:b1.analisis_zillow.realtor_com})),
+          estZillow!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"6px 0 0",lineHeight:1.5}},estZillow==="NO_LOCALIZADO"?NO_LOC_NOTA:estZillow==="COINCIDENCIA_PROBABLE"?"Perfil relacionado por varias señales; confirmar con el cliente que es suyo antes de usar sus cifras.":"Hay información pero no se puede concluir; las cifras se muestran solo cuando el perfil esté confirmado."),
           estZillow==="CONFIRMADO"&&b1.analisis_zillow.resenas&&React.createElement('div',{style:{padding:"10px 0"}},
             React.createElement('p',{style:{fontSize:13,fontWeight:500,margin:"0 0 6px"}},"Reseñas Zillow"),
             React.createElement('div',{style:{display:"flex",gap:16}},
@@ -532,6 +677,7 @@ function App() {
                 d.completitud.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:0,flex:1}},d.completitud.d),
                 React.createElement(Tag,{valor:d.completitud.v})
               ),
+              React.createElement(Senales,{obj:d}),
               estadoDe(d)==="CONFIRMADO"&&d.resenas&&d.resenas.cantidad!==null&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"4px 0 0"}},`⭐ ${d.resenas.promedio} · ${d.resenas.cantidad} reseñas`)
             )
           )
@@ -553,7 +699,8 @@ function App() {
               )
             )
           ),
-          estadoDe(p)!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"10px 0 0",lineHeight:1.5}},estadoDe(p)==="NO_LOCALIZADO"?NO_LOC_NOTA:"Hay información pero no se puede concluir; confirmar el usuario exacto con el cliente."),
+          React.createElement(Senales,{obj:p}),
+          estadoDe(p)!=="CONFIRMADO"&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"10px 0 0",lineHeight:1.5}},estadoDe(p)==="NO_LOCALIZADO"?NO_LOC_NOTA:estadoDe(p)==="COINCIDENCIA_PROBABLE"?"Cuenta relacionada por varias señales; confirmar con el cliente que es suya.":"Hay información pero no se puede concluir; confirmar el usuario exacto con el cliente."),
           p.d&&React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"10px 0 0",lineHeight:1.5}},p.d)
         ),{key:i})),
         card(React.createElement('div',null,React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 12px"}},"⚠️ Problemas en redes"),React.createElement(IL,{items:itemsSocialS})))
@@ -699,7 +846,7 @@ function App() {
             topFortalezas.map((f,i)=>React.createElement('p',{key:i,style:{fontSize:12,margin:"0 0 4px",color:"#374151",lineHeight:1.4}},`• ${f}`))
           ),
           areasPorVerificar.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
-            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#d97706"}},"⏳ Por verificar contigo"),
+            React.createElement('p',{style:{fontSize:12,fontWeight:700,margin:"0 0 6px",color:"#d97706"}},areasProbables?"⏳ Por confirmar contigo (perfiles relacionados)":"⏳ Por verificar contigo"),
             React.createElement('p',{style:{fontSize:12,margin:0,color:"#374151",lineHeight:1.4}},areasPorVerificar.join(" · "))
           ),
           topHuecos.length>0&&React.createElement('div',{style:{padding:"0 20px 14px"}},
