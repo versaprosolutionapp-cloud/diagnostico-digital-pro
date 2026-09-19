@@ -10,6 +10,17 @@ const PRESUPUESTO = {
 };
 const MAX_CONTENIDO_FETCH = 4000; // tokens por página abierta
 const MAX_RONDAS_PAUSE = 3;       // continuaciones tras stop_reason "pause_turn"
+// Dominios que el agente de Anthropic no puede abrir: si van en allowed_domains, la API rechaza TODA la petición (400).
+// Se inicia con los confirmados en producción y se amplía en memoria con los que la API rechace (dura mientras viva la instancia).
+const DOMINIOS_NO_ACCESIBLES = new Set(["realtor.com"]);
+const dominioBloqueado = d => { for (const b of DOMINIOS_NO_ACCESIBLES) { if (d === b || d.endsWith("." + b)) return true; } return false; };
+// Del mensaje "The following domains are not accessible to our user agent: [a.com, b.com]" extrae los dominios
+const dominiosRechazados = (err) => {
+  const msg = String((err && (err.message || (err.error && err.error.message))) || "");
+  if (!/domains? (?:are|is) not accessible/i.test(msg)) return null;
+  const m = msg.match(/\[([^\]]*)\]/);
+  return m ? m[1].split(/[,\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean) : [];
+};
 
 const limpiarDominios = (d) => Array.from(new Set((Array.isArray(d) ? d : []).map(x => String(x || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]).filter(x => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(x)))).slice(0, 40);
 
@@ -25,7 +36,7 @@ const construirTools = (paso, ubicacion, dominios) => {
   const tools = [search];
   if (p.aperturas > 0) {
     const fetch = { type: "web_fetch_20250910", name: "web_fetch", max_uses: p.aperturas, max_content_tokens: MAX_CONTENIDO_FETCH };
-    const dom = limpiarDominios(dominios);
+    const dom = limpiarDominios(dominios).filter(d => !dominioBloqueado(d));
     if (dom.length) fetch.allowed_domains = dom;
     tools.push(fetch);
   }
@@ -79,7 +90,24 @@ export default async function handler(req, res) {
 
     const t0 = Date.now();
     const messages = [{ role: "user", content: userMsg }];
-    let response = await client.messages.create({ model: "claude-sonnet-4-6", max_tokens: 6000, system, tools, messages });
+    // Degradación segura: si la API rechaza allowed_domains por un dominio no accesible, se retira ese dominio y se reintenta;
+    // si vuelve a fallar, se reintenta sin allowed_domains (web_fetch sigue limitado por max_uses y por la regla ABRIBLE del prompt).
+    const rechazados = [];
+    let response, intentos = 0;
+    while (true) {
+      try { response = await client.messages.create({ model: "claude-sonnet-4-6", max_tokens: 6000, system, tools, messages }); break; }
+      catch (err) {
+        const fetchTool = tools.find(t => t.name === "web_fetch");
+        const malos = fetchTool && fetchTool.allowed_domains ? dominiosRechazados(err) : null;
+        if (!malos || intentos >= 2) throw err;
+        intentos++;
+        malos.forEach(d => { DOMINIOS_NO_ACCESIBLES.add(d); rechazados.push(d); });
+        const restantes = fetchTool.allowed_domains.filter(d => !dominioBloqueado(d));
+        if (intentos === 1 && malos.length && restantes.length) fetchTool.allowed_domains = restantes;
+        else { delete fetchTool.allowed_domains; if (!malos.length) rechazados.push("(sin detalle: se quitó allowed_domains)"); }
+        console.log("[DDP-DIAG]", pasoId, "allowed_domains rechazado por la API:", JSON.stringify(malos), "→ reintento", intentos, fetchTool.allowed_domains ? "con " + JSON.stringify(fetchTool.allowed_domains) : "sin allowed_domains");
+      }
+    }
     let content = response.content || [];
     let usage = response.usage;
     let rondas = 1;
@@ -100,13 +128,14 @@ export default async function handler(req, res) {
       web_fetch_requests: usage && usage.server_tool_use ? usage.server_tool_use.web_fetch_requests || 0 : null,
       consultas: ev.consultas, resultados: ev.resultados, abiertas: ev.abiertas,
       dominios_fetch: tools[1] ? tools[1].allowed_domains || [] : [],
+      dominios_rechazados: rechazados, reintentos_dominios: intentos,
     };
 
     // DIAG (temporal): instrumentación de la búsqueda. No registra secretos ni cabeceras.
     try {
       const caso = String(userMsg).split("\n")[0].slice(0, 80);
       const fin = response.stop_reason === "end_turn" ? "normal" : response.stop_reason === "max_tokens" ? "CORTADA_POR_LIMITE" : response.stop_reason === "pause_turn" ? "PAUSE_TURN_SIN_RESOLVER" : response.stop_reason;
-      console.log("[DDP-DIAG]", pasoId, JSON.stringify({ caso, ms: _evidencia.ms, rondas, stop_reason: response.stop_reason, fin, pause_turn: rondas > 1, usage, web_search_requests: _evidencia.web_search_requests, web_fetch_requests: _evidencia.web_fetch_requests, n_consultas: ev.consultas.length, n_resultados: ev.resultados.length, n_abiertas: ev.abiertas.length, texto_chars: texto.length, json_cerrado: /\}\s*(```)?\s*$/.test(texto), dominios_fetch: _evidencia.dominios_fetch }));
+      console.log("[DDP-DIAG]", pasoId, JSON.stringify({ caso, ms: _evidencia.ms, rondas, stop_reason: response.stop_reason, fin, pause_turn: rondas > 1, usage, web_search_requests: _evidencia.web_search_requests, web_fetch_requests: _evidencia.web_fetch_requests, n_consultas: ev.consultas.length, n_resultados: ev.resultados.length, n_abiertas: ev.abiertas.length, texto_chars: texto.length, json_cerrado: /\}\s*(```)?\s*$/.test(texto), dominios_fetch: _evidencia.dominios_fetch, dominios_rechazados: rechazados, reintentos_dominios: intentos }));
       ev.consultas.forEach((q, i) => console.log("[DDP-DIAG]", pasoId, "consulta", i + 1, JSON.stringify(q)));
       ev.abiertas.forEach((a, i) => console.log("[DDP-DIAG]", pasoId, "apertura", i + 1, JSON.stringify(a)));
       for (let i = 0; i < ev.resultados.length; i += 5) console.log("[DDP-DIAG]", pasoId, "resultados", i + 1 + "-" + Math.min(i + 5, ev.resultados.length), JSON.stringify(ev.resultados.slice(i, i + 5).map(r => ({ url: r.url, title: r.title }))));
