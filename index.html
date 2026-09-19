@@ -137,7 +137,7 @@ const DDP_ID = (() => {
   const PLATAFORMAS = [
     {k:"google", re:/(^|[./])google\.[a-z.]+\/maps|(^|[./])g\.co\/|maps\.app\.goo\.gl|business\.google/i, fetch:false},
     {k:"zillow", re:/(^|[./])zillow\.com/i, fetch:true},
-    {k:"realtor_com", re:/(^|[./])realtor\.com/i, fetch:true},
+    {k:"realtor_com", re:/(^|[./])realtor\.com/i, fetch:false}, // el agente de Anthropic no puede abrir realtor.com: solo búsqueda
     {k:"homes", re:/(^|[./])homes\.com/i, fetch:true},
     {k:"mapquest", re:/(^|[./])mapquest\.com/i, fetch:true},
     {k:"yelp", re:/(^|[./])yelp\.com/i, fetch:true},
@@ -176,7 +176,7 @@ const DDP_ID = (() => {
   };
   const urlVistaPara = (plataforma, urls) => (urls||[]).find(u=>u.plataforma===plataforma) || null;
   // Candidatos de R0: solo confianza alta/media y con al menos 2 señales entran a la lista de apertura
-  const DOMINIOS_FETCH_BASE = ["zillow.com","realtor.com","homes.com","yelp.com","mapquest.com","linktr.ee"];
+  const DOMINIOS_FETCH_BASE = ["zillow.com","homes.com","yelp.com","mapquest.com","linktr.ee"]; // realtor.com excluido: no accesible para web_fetch (400 en producción)
   const candidatosAbribles = cands => (cands||[]).filter(c => c && c.url && fetchable(c.url) && (c.confianza==="alta" || (c.confianza==="media" && (c.senales||[]).length>=2)));
   const dominiosFetch = cands => Array.from(new Set([...DOMINIOS_FETCH_BASE, ...candidatosAbribles(cands).map(c=>hostDe(c.url)).filter(Boolean)]));
   const candidatosTexto = (cands, urls) => {
@@ -208,7 +208,7 @@ IDENTIDAD: registra TODAS las formas del nombre que veas en las plataformas en i
 AFIRMACIONES: cifras (seguidores, ventas, reseñas, ratings, años, premios) solo si las viste; de lo contrario null o "por verificar". Nada de promesas de resultado: prohibido "#1", "número 1", "posicionarte como", "superar a", "garantizado".
 SIN COMPETENCIA: este diagnóstico evalúa y mejora la presencia digital del cliente auditado; NO busques, nombres ni evalúes competidores, referentes, rankings ni comparaciones con otros agentes o negocios. Toda búsqueda se dedica exclusivamente a resolver, verificar y auditar los activos digitales del cliente. Prohibido "competidores débiles", "mejor que", "por encima de", "líder de la zona".
 `;
-const APERTURA = `APERTURA SELECTIVA (web_fetch): si recibes CANDIDATOS_IDENTIFICADOS, parte de ellos en vez de buscar desde cero. Abre con web_fetch SOLO candidatos marcados ABRIBLE (confianza alta, o media con ≥2 señales), en este orden de prioridad: sitio propio → Zillow/Realtor.com → Linktree/Homes.com/Yelp. Máximo el número de aperturas permitido. NO intentes abrir Google Maps, Instagram, Facebook, LinkedIn ni TikTok (no se renderizan): confírmalos por enlace directo desde el sitio propio, por teléfono/correo visto en otra fuente, o déjalos en el estado prudente que corresponda. Al abrir una página extrae: teléfono, correo, brokerage, nombre mostrado, dirección, enlaces a redes; regístralos en huella_encontrada y en coincidencias/diferencias del activo. Copia en "fuente_url" la URL exacta que sustenta cada activo. Si una apertura falla, el activo queda REQUIERE_VERIFICACION con su URL vista.
+const APERTURA = `APERTURA SELECTIVA (web_fetch): si recibes CANDIDATOS_IDENTIFICADOS, parte de ellos en vez de buscar desde cero. Abre con web_fetch SOLO candidatos marcados ABRIBLE (confianza alta, o media con ≥2 señales), en este orden de prioridad: sitio propio → Zillow → Linktree/Homes.com/Yelp. Realtor.com NO se abre (no accesible): se investiga solo por búsqueda y conserva su URL/evidencia. Máximo el número de aperturas permitido. NO intentes abrir Google Maps, Instagram, Facebook, LinkedIn, TikTok ni Realtor.com: confírmalos por enlace directo desde el sitio propio, por teléfono/correo visto en otra fuente, o déjalos en el estado prudente que corresponda. Al abrir una página extrae: teléfono, correo, brokerage, nombre mostrado, dirección, enlaces a redes; regístralos en huella_encontrada y en coincidencias/diferencias del activo. Copia en "fuente_url" la URL exacta que sustenta cada activo. Si una apertura falla, el activo queda REQUIERE_VERIFICACION con su URL vista.
 `;
 const SYSTEM_R0 = (tipo) => PROTOCOLO + `PASO 0 — RESOLUCIÓN DE IDENTIDAD (sin auditar nada todavía). Eres experto en presencia digital de ${tipo==="realtor"?"agentes de bienes raíces en Texas y Florida":"pequeños negocios en Texas"}.
 Objetivo único: localizar los perfiles y páginas que probablemente pertenecen a este ${tipo==="realtor"?"agente":"negocio"} y registrar sus señales. NO evalúes calidad, NO puntúes, NO propongas plan.
