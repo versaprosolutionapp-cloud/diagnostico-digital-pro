@@ -93,13 +93,16 @@ const DDP_ID = (() => {
     const difFuerte = di.some(d=>FUERTES.includes(d)); // teléfono/correo/dominio/dirección distintos: pesa en contra
     const e = estadoModelo;
     if (e==="NO_LOCALIZADO") return {estado:e, fuertes, comp, motivo:"sin candidato"};
+    // Ancla de teléfono: si el consultor suministró teléfono y ninguna señal fuerte vincula el activo, las complementarias no bastan para "probable"
+    const ancla = !!(ctx && ctx.telefonoSuministrado);
     if (e==="CONFIRMADO") {
-      if (fuertes.length===0) return {estado: comp.length>=3 ? "COINCIDENCIA_PROBABLE" : "REQUIERE_VERIFICACION", fuertes, comp, motivo:"el modelo confirmó sin una señal fuerte registrada"};
+      if (fuertes.length===0) return {estado: (comp.length>=3 && !ancla) ? "COINCIDENCIA_PROBABLE" : "REQUIERE_VERIFICACION", fuertes, comp, motivo: ancla && comp.length>=3 ? "hay teléfono suministrado y ninguna señal fuerte vincula este perfil" : "el modelo confirmó sin una señal fuerte registrada"};
       if (difNombre && fuertes.length===1) return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:"una sola señal fuerte y el nombre mostrado difiere"};
       if (difFuerte && fuertes.length<2) return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:"hay un dato de contacto distinto al suministrado"};
       return {estado:"CONFIRMADO", fuertes, comp, motivo:""};
     }
     if (e==="COINCIDENCIA_PROBABLE") {
+      if (fuertes.length===0 && ancla) return {estado:"REQUIERE_VERIFICACION", fuertes, comp, motivo:"hay teléfono suministrado y ninguna señal fuerte vincula este perfil"};
       if (fuertes.length===0 && comp.length<3) return {estado:"REQUIERE_VERIFICACION", fuertes, comp, motivo:"solo nombre/ciudad: insuficiente para coincidencia probable"};
       return {estado:"COINCIDENCIA_PROBABLE", fuertes, comp, motivo:""};
     }
@@ -113,7 +116,7 @@ const DDP_ID = (() => {
     variantes_sugeridas: variantesNombre(intake.nombre, intake.ciudad, intake.brokerage),
     telefono_variantes: telVariantes(intake.telefono),
     encontrado: { nombres:[], telefonos:[], correos:[], dominios:[], handles:[], brokerage:[], direcciones:[], equipo:[] },
-    coincide: [], busquedas: [], urls_vistas: []
+    coincide: [], busquedas: [], urls_vistas: [], pistas: []
   });
   const push = (arr, v, fuente) => { if(!v) return; const val=String(v).trim(); if(!val || arr.some(x=>x.v.toLowerCase()===val.toLowerCase())) return; arr.push({v:val, fuente:fuente||""}); };
   const enriquecerHuella = (h, d1) => {
@@ -154,13 +157,20 @@ const DDP_ID = (() => {
   const fetchable = url => { const u=String(url||""); const p=PLATAFORMAS.find(x=>x.re.test(u)); if(p) return p.fetch; return !!hostDe(u) && !DOMINIOS_GENERICOS.test(u); };
   const tokensNombre = nombre => Array.from(new Set(sinAcentos(String(nombre||"")).toLowerCase().split(/[^a-z]+/).filter(t=>t.length>=4)));
   // ¿La URL o el título contienen al menos dos partes del nombre (o una forma unida como "marialejandra")?
+  // Asociación estricta: el apellido final (el menos común) acompañado de otra parte del nombre, o la forma unida
+  // ("marialejandra") acompañada de un apellido. "maria + perez" o "maria + alejandra" NO bastan (homónimos frecuentes).
   const urlCoincideNombre = (url, title, nombre) => {
     const tk = tokensNombre(nombre); if(!tk.length) return false;
     const txt = sinAcentos(String(url||"")+" "+String(title||"")).toLowerCase().replace(/[^a-z]+/g," ");
     const flat = txt.replace(/\s+/g,"");
-    const hits = tk.filter(t=>flat.includes(t)).length;
-    const unido = tk.length>=2 && flat.includes(tk[0]+tk[1]);
-    return hits>=2 || unido;
+    if (tk.length===1) return flat.includes(tk[0]);
+    const first = tk[0], last = tk[tk.length-1], rest = tk.slice(1);
+    const unidos = tk.length>=2 ? [tk[0]+tk[1], (tk[0].slice(-1)===tk[1][0] ? tk[0]+tk[1].slice(1) : "")].filter(Boolean) : [];
+    const unido = unidos.some(u=>flat.includes(u));
+    if (tk.length===2) return (flat.includes(first) && flat.includes(last)) || unido;
+    const hitsRest = rest.filter(t=>flat.includes(t));
+    const otroApellido = hitsRest.some(t=>t!==tk[1]);
+    return (flat.includes(last) && (flat.includes(first) || hitsRest.length>=2)) || (unido && otroApellido) || hitsRest.length>=3;
   };
   // URLs vistas en resultados de búsqueda que parecen ser del cliente (no se evalúan: solo se conservan como pista)
   const filtrarUrlsVistas = (resultados, nombre, previas) => {
@@ -179,11 +189,77 @@ const DDP_ID = (() => {
   const DOMINIOS_FETCH_BASE = ["zillow.com","homes.com","yelp.com","mapquest.com","linktr.ee"]; // realtor.com excluido: no accesible para web_fetch (400 en producción)
   const candidatosAbribles = cands => (cands||[]).filter(c => c && c.url && fetchable(c.url) && (c.confianza==="alta" || (c.confianza==="media" && (c.senales||[]).length>=2)));
   const dominiosFetch = cands => Array.from(new Set([...DOMINIOS_FETCH_BASE, ...candidatosAbribles(cands).map(c=>hostDe(c.url)).filter(Boolean)]));
-  const candidatosTexto = (cands, urls) => {
-    const abr = candidatosAbribles(cands);
-    const lin = (cands||[]).map(c=>`- [${c.plataforma||plataformaDeUrl(c.url)}] ${c.url||"(sin url)"} | nombre mostrado: ${c.nombre_mostrado||"?"} | señales: ${(c.senales||[]).join(", ")||"ninguna"}${(c.diferencias||[]).length?" | diferencias: "+c.diferencias.join(", "):""} | confianza: ${c.confianza||"?"}${abr.includes(c)?" | ABRIBLE con web_fetch":""}`);
+  const candidatosTexto = (principales, pistas, urls, ancla) => {
+    const abr = candidatosAbribles(principales);
+    const linea = c => `- [${c.plataforma||plataformaDeUrl(c.url)}] ${c.url||"(sin url)"} | nombre mostrado: ${c.nombre_mostrado||"?"} | señales: ${(c.senales||[]).join(", ")||"ninguna"}${(c.diferencias||[]).length?" | diferencias: "+c.diferencias.join(", "):""} | confianza: ${c.confianza||"?"}`;
+    const pri = (principales||[]).map(c=>linea(c)+(abr.includes(c)?" | ABRIBLE con web_fetch":""));
+    const pis = (pistas||[]).map(c=>linea(c)+(c._motivo?" | por qué no vincula: "+c._motivo:""));
     const vis = (urls||[]).slice(0,25).map(u=>`- [${u.plataforma}] ${u.url}${u.title?" — "+u.title:""}`);
-    return `CANDIDATOS_IDENTIFICADOS (paso 0):\n${lin.join("\n")||"- ninguno"}\nURLS_VISTAS_EN_RESULTADOS (no evaluadas; pueden ser del cliente o de un homónimo):\n${vis.join("\n")||"- ninguna"}`;
+    return `IDENTIDAD_PRINCIPAL (paso 0; vinculada por señal fuerte${ancla==="telefono"?", con el teléfono suministrado como ancla":""}; solo estos representan al cliente y solo estos pueden abrirse):\n${pri.join("\n")||"- ninguna todavía: el cliente aún no está vinculado a ningún perfil; audita con prudencia y no trates ninguna pista como suya"}\nPISTAS_NO_VINCULADAS (homónimos o perfiles sin señal fuerte; NO son identidad del cliente; no copies sus nombres, teléfonos ni datos a la huella; solo pueden subir si encuentras teléfono, correo o enlace que los vincule):\n${pis.join("\n")||"- ninguna"}\nURLS_VISTAS_EN_RESULTADOS (no evaluadas; pueden ser del cliente o de un homónimo):\n${vis.join("\n")||"- ninguna"}`;
+  };
+  // ---------- Consolidación de identidad (paso 0): principales vs pistas ----------
+  // Principal = candidato vinculado por una señal fuerte verificable. Con teléfono suministrado, el teléfono es el ANCLA:
+  // solo un teléfono que coincide (verificado aquí, no por la etiqueta del modelo), brokerage+teléfono o licencia anclan por sí solos;
+  // correo/dominio/enlace/dirección solo cuentan encadenados a un principal ya anclado. Sin teléfono suministrado, las señales
+  // fuertes del protocolo (correo, dominio, enlace directo, dirección, licencia, brokerage+teléfono) valen por sí mismas.
+  const FUERTES_ANCLA = ["telefono","brokerage+telefono","licencia"];
+  const FUERTES_ENCADENADAS = ["correo","dominio","enlace","direccion"];
+  const consolidarCandidatos = (cands, suministrado) => {
+    const tel = normTel((suministrado||{}).telefono||"");
+    const lista = (cands||[]).filter(c=>c&&typeof c==="object").map(c=>({...c, senales:(c.senales||[]).map(String), diferencias:(c.diferencias||[]).map(String), _motivo:""}));
+    const principales=[], pistas=[];
+    lista.forEach(c => {
+      let sen = c.senales.map(normSenal);
+      // Teléfono: se verifica con el número, nunca con la etiqueta
+      if (c.telefono && normTel(c.telefono)) {
+        if (tel && mismoTel(c.telefono, tel)) { if(!sen.includes("telefono")) { c.senales.push("teléfono coincide con el suministrado"); sen.push("telefono"); } }
+        else if (tel) { c.diferencias.push("teléfono distinto al suministrado: "+fmtTel(c.telefono)); sen = sen.filter(x=>x!=="telefono"); c.senales = c.senales.filter(x=>normSenal(x)!=="telefono"); }
+        else { sen = sen.filter(x=>x!=="telefono"); c.senales = c.senales.filter(x=>normSenal(x)!=="telefono"); } // sin teléfono suministrado no hay con qué coincidir
+      } else if (sen.includes("telefono")) { // etiqueta "teléfono" sin número: no verificable
+        sen = sen.filter(x=>x!=="telefono"); c.senales = c.senales.filter(x=>normSenal(x)!=="telefono"); c._motivo = "señal 'teléfono' declarada sin número: no verificable";
+      }
+      if (sen.includes("brokerage") && sen.includes("telefono")) sen.push("brokerage+telefono");
+      const dif = c.diferencias.map(normSenal);
+      c._telDistinto = dif.includes("telefono");
+      c._ancla = !c._telDistinto && sen.some(x=>FUERTES_ANCLA.includes(x));
+      c._encadenada = !c._telDistinto && sen.some(x=>FUERTES_ENCADENADAS.includes(x));
+      c._sen = sen;
+    });
+    // Sin teléfono suministrado: cualquier señal fuerte del protocolo vincula por sí sola
+    lista.forEach(c => { if (!tel && (c._ancla || c._encadenada)) c._vinculo = "fuerte"; });
+    // Con teléfono suministrado: primero anclas; luego encadenadas solo si ya existe un principal anclado
+    if (tel) {
+      lista.forEach(c => { if (c._ancla) c._vinculo = "fuerte"; });
+      const hayAncla = lista.some(c => c._vinculo === "fuerte");
+      lista.forEach(c => { if (!c._vinculo && c._encadenada) { if (hayAncla) c._vinculo = "fuerte"; else c._motivo = (c._motivo?c._motivo+"; ":"")+"enlace/dominio/correo sin ancla: hace falta que el teléfono suministrado aparezca en algún perfil"; } });
+    }
+    lista.forEach(c => {
+      if (c._vinculo === "fuerte") principales.push(c);
+      else { if (c._telDistinto) c._motivo = (c._motivo?c._motivo+"; ":"")+"teléfono distinto"; else if (!c._motivo) c._motivo = "solo señales complementarias (nombre/ciudad/actividad): no vincula"; pistas.push(c); }
+    });
+    return { principales, pistas, ancla: tel ? "telefono" : "ninguna" };
+  };
+  // Solo los datos cuya fuente sea un principal entran a la huella
+  const huellaDePrincipales = (hf, principales, suministrado) => {
+    if (!hf || !principales || !principales.length) return {};
+    const sum = suministrado||{};
+    const claves = principales.flatMap(c => [c.plataforma, plataformaDeUrl(c.url), hostDe(c.url)]).filter(Boolean).map(x=>String(x).toLowerCase());
+    const fuenteOk = f => { const t=String(f||"").toLowerCase(); return !!t && claves.some(k=>t.includes(k)||k.includes(t)); };
+    const urlsPri = principales.map(c=>String(c.url||"").toLowerCase());
+    const nombresPri = principales.map(c=>sinAcentos(String(c.nombre_mostrado||"")).toLowerCase()).filter(Boolean);
+    const hostsPri = principales.map(c=>hostDe(c.url)).filter(Boolean);
+    // Además de la fuente, el valor debe ser coherente con un principal (un homónimo de la misma plataforma no pasa)
+    const valorOk = (k, v) => {
+      const t = sinAcentos(String(v||"")).toLowerCase().trim(); if(!t) return false;
+      if (k==="handles") { const h=t.replace(/^@/,""); return urlsPri.some(u=>u.includes(h)); }
+      if (k==="nombres") return nombresPri.includes(t) || urlCoincideNombre("", t, sum.nombre||"");
+      if (k==="telefonos") return sum.telefono ? mismoTel(t, sum.telefono) : true;
+      if (k==="dominios") { const hd=hostDe(/^https?:/i.test(t)?t:"https://"+t); return !!hd && hostsPri.includes(hd); }
+      return true;
+    };
+    const out = {};
+    Object.keys(hf).forEach(k => { out[k] = (hf[k]||[]).filter(x => x && typeof x==="object" && fuenteOk(x.fuente) && valorOk(k, x.v)); });
+    return out;
   };
   const huellaTexto = h => JSON.stringify({
     SUMINISTRADO_POR_CONSULTOR: h.suministrado,
@@ -194,7 +270,7 @@ const DDP_ID = (() => {
     VARIANTES_YA_PROBADAS: h.busquedas,
     URLS_VISTAS: (h.urls_vistas||[]).map(u=>u.url)
   });
-  return { PLATAFORMAS, hostDe, plataformaDeUrl, fetchable, urlCoincideNombre, filtrarUrlsVistas, urlVistaPara, candidatosAbribles, dominiosFetch, candidatosTexto, sinAcentos, normTel, mismoTel, fmtTel, telVariantes, variantesNombre, normSenal, esFuerte, ajustarEstado, nuevaHuella, enriquecerHuella, huellaTexto, FUERTES, COMPLEMENTARIAS };
+  return { consolidarCandidatos, huellaDePrincipales, PLATAFORMAS, hostDe, plataformaDeUrl, fetchable, urlCoincideNombre, filtrarUrlsVistas, urlVistaPara, candidatosAbribles, dominiosFetch, candidatosTexto, sinAcentos, normTel, mismoTel, fmtTel, telVariantes, variantesNombre, normSenal, esFuerte, ajustarEstado, nuevaHuella, enriquecerHuella, huellaTexto, FUERTES, COMPLEMENTARIAS };
 })();
 window.DDP_ID = DDP_ID;
 
@@ -218,7 +294,7 @@ Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
 "huella_encontrada":{"nombres":[{"v":"","fuente":""}],"telefonos":[{"v":"","fuente":""}],"correos":[],"dominios":[],"handles":[],"brokerage":[],"direcciones":[],"equipo":[]},
 "busquedas":["variantes de búsqueda usadas"],
 "nota":"1 oración: qué quedó sin localizar y por qué"}
-Reglas: confianza "alta" solo con una señal fuerte (teléfono, correo, dominio, enlace directo, brokerage+teléfono); "media" con ciudad + actividad + nombre parecido; "baja" con solo nombre. Incluye también homónimos dudosos como "baja" con sus diferencias: es mejor listar y descartar después que omitir. Nunca inventes URLs: solo las que aparecieron en resultados. SOLO JSON.`;
+Reglas: confianza "alta" solo con una señal fuerte (teléfono, correo, dominio, enlace directo, brokerage+teléfono); "media" con ciudad + actividad + nombre parecido; "baja" con solo nombre. Incluye también homónimos dudosos como "baja" con sus diferencias: es mejor listar y descartar después que omitir. Si hay teléfono suministrado, es el ANCLA: busca el número entre comillas en cada plataforma y copia en "telefono" el número exacto que veas en cada candidato (o déjalo vacío); no marques "telefono" como señal sin haber visto el número. En "huella_encontrada" registra SOLO datos de candidatos con señal fuerte, con su fuente; los nombres, teléfonos o dominios de homónimos NO van a la huella. Nunca inventes URLs: solo las que aparecieron en resultados. SOLO JSON.`;
 
 const SYSTEM_R1 = PROTOCOLO + APERTURA + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
 Usa web_search para investigar el sitio web, Google Business Profile, Zillow y Realtor.com del AGENTE (no de la agencia/brokerage).
@@ -253,7 +329,7 @@ Detalles máximo 10 palabras.
 "oportunidades":["o1","o2","o3"],
 "plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
 "mensaje_cierre":"mensaje WhatsApp máximo 4 líneas"}
-Reglas: plan máximo 4 pasos, sin promesas de resultado; oportunidades y plan se refieren únicamente a los activos del agente (nunca a competidores, referentes ni comparaciones). Si un activo del paso 1 quedó NO_LOCALIZADO o REQUIERE_VERIFICACION, el plan y las oportunidades empiezan por "verificar con el agente", no por "crear desde cero".
+Reglas: plan máximo 4 pasos, sin promesas de resultado; oportunidades y plan se refieren únicamente a los activos del agente (nunca a competidores, referentes ni comparaciones). Para cualquier activo NO_LOCALIZADO, REQUIERE_VERIFICACION o COINCIDENCIA_PROBABLE, oportunidades y plan NUNCA dicen "crear", "abrir", "activar", "configurar", "lanzar" ni "registrar" ese activo: primero "verificar con el agente si ya existe" y solo después la mejora. Si un activo del paso 1 quedó NO_LOCALIZADO o REQUIERE_VERIFICACION, el plan y las oportunidades empiezan por "verificar con el agente", no por "crear desde cero".
 servicio: "Diagnóstico + Kit Realtor"|"Página web para agente"|"Configuración WhatsApp Business"|"Setup Instagram/Facebook + bio"|"Plan de contenido mensual (redes)"|"Gestión de reseñas (1 mes)"|"Optimización Google Business + Zillow"|"Guía de video (grabación + edición)"|"Mantenimiento digital mensual"
 SOLO JSON.`;
 
@@ -285,7 +361,7 @@ Detalles máximo 10 palabras.
 "ads":{"conviene":true,"tipo":"Google Ads/Local Services Ads/No recomendado","objetivo":"Llamadas/Formularios/Visitas","kw":["kw1","kw2"],"presupuesto":"$X-$Y/mes","errores":["e1","e2"]},
 "plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
 "mensaje_cierre":"mensaje WhatsApp máximo 4 líneas"}
-Reglas: plan máximo 4 pasos sin promesas de resultado; oportunidades y plan se refieren únicamente a los activos del negocio (nunca a competidores, referentes ni comparaciones).
+Reglas: plan máximo 4 pasos sin promesas de resultado; oportunidades y plan se refieren únicamente a los activos del negocio (nunca a competidores, referentes ni comparaciones). Para cualquier activo NO_LOCALIZADO, REQUIERE_VERIFICACION o COINCIDENCIA_PROBABLE, oportunidades y plan NUNCA dicen "crear", "abrir", "activar", "configurar", "lanzar" ni "registrar" ese activo: primero "verificar con el agente si ya existe" y solo después la mejora.
 servicio: "Optimización SEO básica"|"Rediseño o mejora visual web"|"Configuración Google Business Profile"|"Gestión de reseñas (1 mes)"|"Setup redes sociales + bio"|"Plan de contenido mensual"|"Campaña Google Ads (setup)"|"Mantenimiento digital mensual"|"Sitio web completo (5 páginas)"|"Redirección y configuración de dominio"
 SOLO JSON.`;
 
@@ -382,12 +458,15 @@ function App() {
       setLoadMsg("🪪 Resolviendo identidad: buscando perfiles y páginas del cliente...");
       const d0 = await callAPI(SYSTEM_R0(tipo), base, { paso:"R0", ubicacion: ubic });
       setR0(d0);
-      const h0 = DDP_ID.enriquecerHuella(h, d0);
+      // Consolidación: solo los candidatos vinculados por señal fuerte (principales) alimentan la huella; los homónimos quedan aparte como pistas
+      const cons = DDP_ID.consolidarCandidatos(d0.candidatos, h.suministrado);
+      const h0 = DDP_ID.enriquecerHuella(h, { candidatos: cons.principales, huella_encontrada: DDP_ID.huellaDePrincipales(d0.huella_encontrada, cons.principales, h.suministrado), busquedas: d0.busquedas });
       h0.urls_vistas = DDP_ID.filtrarUrlsVistas(d0._evidencia?.resultados, nombreRef, h0.urls_vistas);
-      (d0.candidatos||[]).forEach(c => { if(c&&c.url&&!h0.urls_vistas.some(u=>u.url===c.url)) h0.urls_vistas.push({url:c.url,title:c.nombre_mostrado||"",plataforma:c.plataforma||DDP_ID.plataformaDeUrl(c.url)}); });
+      cons.principales.forEach(c => { if(c&&c.url&&!h0.urls_vistas.some(u=>u.url===c.url)) h0.urls_vistas.push({url:c.url,title:c.nombre_mostrado||"",plataforma:c.plataforma||DDP_ID.plataformaDeUrl(c.url)}); });
+      h0.pistas = cons.pistas.map(c=>({plataforma:c.plataforma||DDP_ID.plataformaDeUrl(c.url), url:c.url||"", nombre:c.nombre_mostrado||"", motivo:c._motivo||""}));
       setHuella({...h0});
-      const candTexto = DDP_ID.candidatosTexto(d0.candidatos, h0.urls_vistas);
-      const dominios = DDP_ID.dominiosFetch(d0.candidatos);
+      const candTexto = DDP_ID.candidatosTexto(cons.principales, cons.pistas, h0.urls_vistas, cons.ancla);
+      const dominios = DDP_ID.dominiosFetch(cons.principales);
       // ---- Paso 1: auditoría web + Google + Zillow, partiendo de los candidatos ----
       setLoadMsg(isRealtor ? "🔍 Auditando web, Google Business y Zillow..." : "🔍 Auditando web y Google Maps...");
       const d1 = await callAPI(isRealtor ? SYSTEM_R1 : SYSTEM_B1, `${base}\n${candTexto}\nHUELLA_DE_IDENTIDAD (paso 0 → paso 1): ${DDP_ID.huellaTexto(h0)}`, { paso:"R1", ubicacion: ubic, dominios });
@@ -408,7 +487,7 @@ function App() {
         candTexto,
         `HUELLA_DE_IDENTIDAD (estructurada, paso 1 → paso 2): ${DDP_ID.huellaTexto(h2)}`,
       ].filter(Boolean).join("\n");
-      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa la huella completa (nombres vistos, teléfonos, dominios, handles, brokerage, equipo) como claves de búsqueda y de comparación antes de declarar cualquier red como no localizada; registra coincidencias y diferencias por activo.`, { paso:"R2", ubicacion: ubic, dominios: DDP_ID.dominiosFetch(d0.candidatos) });
+      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa la huella completa (nombres vistos, teléfonos, dominios, handles, brokerage, equipo) como claves de búsqueda y de comparación antes de declarar cualquier red como no localizada; registra coincidencias y diferencias por activo.`, { paso:"R2", ubicacion: ubic, dominios });
       delete d2.competidores; delete d2.referente_top; // módulo de competencia eliminado: se ignora aunque el modelo lo devuelva
       (d2.social||[]).forEach(r => { const n=DDP_ID.sinAcentos(String(r.red||"")).toLowerCase(); etiquetar(r, /instagram/.test(n)?"instagram":/facebook/.test(n)?"facebook":/tiktok/.test(n)?"tiktok":/linkedin/.test(n)?"linkedin":/youtube/.test(n)?"youtube":""); });
       const h3 = {...h2}; h3.urls_vistas = DDP_ID.filtrarUrlsVistas(d2._evidencia?.resultados, nombreRef, h2.urls_vistas); setHuella(h3);
@@ -426,7 +505,7 @@ function App() {
   const telefonoCoincideEn = obj => { if(!telSuministrado||!obj) return false; const cand=[obj.telefono,obj.contacto?.telefono,obj.contacto?.d,obj.d].filter(x=>typeof x==="string"); return cand.some(x=>DDP_ID.mismoTel(x,telSuministrado)); };
   const estadoBruto = obj => { if(!obj) return "NO_LOCALIZADO"; const e=normEstado(obj.estado); if(e) return e; if(obj.encontrado===false) return "NO_LOCALIZADO"; if(obj.encontrado===true) return "CONFIRMADO"; return "REQUIERE_VERIFICACION"; };
   // Estado ajustado: el modelo propone, las señales registradas deciden (sin puntaje opaco)
-  const resolver = obj => { const bruto=estadoBruto(obj); if(!obj) return {estado:bruto,fuertes:[],comp:[],motivo:""}; const tieneSenales=Array.isArray(obj.coincidencias)||Array.isArray(obj.diferencias); if(!tieneSenales) return {estado:bruto,fuertes:[],comp:[],motivo:"sin señales registradas (esquema anterior)"}; return DDP_ID.ajustarEstado(bruto, obj.coincidencias, obj.diferencias, {telefonoCoincide: telefonoCoincideEn(obj)}); };
+  const resolver = obj => { const bruto=estadoBruto(obj); if(!obj) return {estado:bruto,fuertes:[],comp:[],motivo:""}; const tieneSenales=Array.isArray(obj.coincidencias)||Array.isArray(obj.diferencias); if(!tieneSenales) return {estado:bruto,fuertes:[],comp:[],motivo:"sin señales registradas (esquema anterior)"}; return DDP_ID.ajustarEstado(bruto, obj.coincidencias, obj.diferencias, {telefonoCoincide: telefonoCoincideEn(obj), telefonoSuministrado: !!telSuministrado}); };
   const resolverBase = resolver;
   const resolverConUrls = obj => { const r = resolverBase(obj); if(!obj||!obj._plataforma||!huella) return r; if(r.estado!=="NO_LOCALIZADO") return r; const u = DDP_ID.urlVistaPara(obj._plataforma, huella.urls_vistas); if(!u) return r; return {...r, estado:"REQUIERE_VERIFICACION", motivo:"el modelo no la incorporó, pero una URL de esta plataforma con el nombre del cliente apareció en los resultados", url_vista:u.url}; };
   const estadoDe = obj => resolverConUrls(obj).estado;
@@ -446,6 +525,20 @@ function App() {
   const AUSENCIA = /(\bno existe\b|\bausente\b|\bsin (perfil|ficha|p[áa]gina|sitio|reseñas|presencia)\b|\b0 reseñas\b|\bno tiene\b|\binactiv|incumplimiento)/i;
   const sinPromesas = t => { if(!t) return t; const fr=String(t).split(/(?<=[.!?])\s+/).filter(x=>!PROMESA.test(x)); return fr.join(" ").trim(); };
   const sinPromesasLista = arr => (arr||[]).map(sinPromesas).filter(x=>x&&x.length>3);
+  // Acciones sobre activos no confirmados: "crear/abrir/activar/configurar X" → "Verificar con el agente si ya existe X; solo entonces …"
+  const PLAT_ACCION = [
+    {k:"gmaps", re:/google (business|maps|my business)|ficha de google|perfil de google|google business profile|\bgbp\b/i, n:"la ficha de Google Business"},
+    {k:"zillow", re:/zillow/i, n:"el perfil de Zillow"}, {k:"zillow", re:/realtor\.com/i, n:"el perfil de Realtor.com"},
+    {k:"directorios", re:/homes\.com|yelp|mapquest|directorios?/i, n:"los directorios (Homes.com / Yelp / MapQuest)"},
+    {k:"social:instagram", re:/instagram/i, n:"la cuenta de Instagram"}, {k:"social:facebook", re:/facebook/i, n:"la página de Facebook"},
+    {k:"social:tiktok", re:/tiktok/i, n:"la cuenta de TikTok"}, {k:"social:linkedin", re:/linkedin/i, n:"el perfil de LinkedIn"},
+    {k:"social:youtube", re:/youtube/i, n:"el canal de YouTube"}, {k:"social:whatsapp", re:/whatsapp/i, n:"WhatsApp Business"},
+    {k:"web", re:/sitio web|p[aá]gina web|website|dominio propio|landing/i, n:"el sitio web"},
+  ];
+  const VERBO_CREAR = /\b(crear|crea|creaci[oó]n de|abrir|abre|apertura de|activar|activa|activaci[oó]n de|configurar|configura|configuraci[oó]n de|lanzar|lanza|registrar|registra|montar|construir|desarrollar|implementar|dar de alta)\b/i;
+  const estadoPlataforma = k => { if(k.startsWith("social:")) { const red=k.split(":")[1]; const r=(b2?.social||[]).find(x=>DDP_ID.sinAcentos(String(x.red||"")).toLowerCase().includes(red)); return r ? estadoDe(r) : "NO_LOCALIZADO"; } return (areaEstados||{})[k] || "NO_LOCALIZADO"; };
+  const sanearAccion = t => { if(!t) return t; return String(t).split(/(?<=[.!?])\s+/).map(fr => { if(!VERBO_CREAR.test(fr)) return fr; const p=PLAT_ACCION.find(x=>x.re.test(fr)); if(!p) return fr; const e=estadoPlataforma(p.k); if(e==="CONFIRMADO") return fr; const cuerpo=fr.replace(/^\s*[-•]\s*/,""); return `Verificar con el agente si ya existe ${p.n}; solo entonces: ${cuerpo.charAt(0).toLowerCase()+cuerpo.slice(1)}`; }).join(" "); };
+  const sanearLista = arr => (arr||[]).map(sanearAccion);
   // Items de un área: si el activo no está confirmado, no se admiten conclusiones de ausencia.
   const itemsSeguros = (items, estado) => {
     if(estado==="CONFIRMADO") return items||[];
@@ -586,9 +679,9 @@ function App() {
   const topFortalezas = (b1.fortalezas||[]).slice(0,3);
   const cumpl = cumplimientoTexto(b1.cumplimiento);
   const identidad = b1.identidad||{};
-  const nombresVistos = Array.from(new Set([...(identidad.nombres_encontrados||[]), b1.analisis_gmaps?.nombre_perfil, b1.analisis_zillow?.nombre_perfil, ...(b2.social||[]).map(x=>x.handle)].filter(Boolean)));
+  const nombresVistos = Array.from(new Set([...(identidad.nombres_encontrados||[]), b1.analisis_gmaps?.nombre_perfil, b1.analisis_zillow?.nombre_perfil, ...(b2.social||[]).filter(x=>["CONFIRMADO","COINCIDENCIA_PROBABLE"].includes(estadoDe(x))).map(x=>x.handle)].filter(Boolean)));
   const napInconsistente = identidad.nap_inconsistente===true || nombresVistos.length>1;
-  const serviciosKit = (b2.plan||[]).slice(0,3).map(p=>p.titulo);
+  const serviciosKit = (b2.plan||[]).slice(0,3).map(p=>sanearAccion(sinPromesas(p.titulo)));
 
   const tabs = tipo==="realtor"
     ? [["resumen","📋 Resumen"],["web","🌐 Web"],["gmaps","📍 Google"],["zillow","🏠 Zillow"],["directorios","📌 Directorios"],["social","📱 Redes"]]
@@ -649,6 +742,10 @@ function App() {
           React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},"Coincide suministrado ↔ público"),
           React.createElement('p',{style:{fontSize:12,color:huella.coincide.length?"#16a34a":"#6b7280",margin:0}},huella.coincide.length?huella.coincide.map(c=>"✓ "+c).join("  "):"sin coincidencias registradas todavía"),
           huella.busquedas.length>0&&React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"8px 0 0"}},`Variantes probadas: ${huella.busquedas.join("; ")}`),
+          (huella.pistas||[]).length>0&&React.createElement('div',{style:{marginTop:8}},
+            React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},`Pistas no vinculadas (${huella.pistas.length}; homónimos o perfiles sin señal fuerte, fuera de la huella)`),
+            huella.pistas.slice(0,6).map((u,i)=>React.createElement('p',{key:i,style:{fontSize:11,color:"#6b7280",margin:"0 0 2px",wordBreak:"break-all"}},`[${u.plataforma}] ${u.nombre||u.url}${u.motivo?" — "+u.motivo:""}`))
+          ),
           (huella.urls_vistas||[]).length>0&&React.createElement('div',{style:{marginTop:8}},
             React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},`URLs vistas en resultados (${huella.urls_vistas.length}; pistas, no confirmadas)`),
             huella.urls_vistas.slice(0,8).map((u,i)=>React.createElement('p',{key:i,style:{fontSize:11,color:"#374151",margin:"0 0 2px",wordBreak:"break-all"}},`[${u.plataforma}] ${u.url}`))
@@ -672,7 +769,7 @@ function App() {
         ),
         b2&&b2.oportunidades?.length>0&&card(React.createElement('div',null,
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 10px"}},"💡 Oportunidades"),
-          sinPromesasLista(b2.oportunidades).map((o,i)=>React.createElement('p',{key:i,style:{fontSize:13,margin:"0 0 8px",paddingLeft:12,borderLeft:`3px solid ${GOLD}`,lineHeight:1.5,color:"#374151"}},o))
+          sanearLista(sinPromesasLista(b2.oportunidades)).map((o,i)=>React.createElement('p',{key:i,style:{fontSize:13,margin:"0 0 8px",paddingLeft:12,borderLeft:`3px solid ${GOLD}`,lineHeight:1.5,color:"#374151"}},o))
         ),{border:`1px solid ${GOLD}50`}),
         b1.fortalezas?.length>0&&card(React.createElement('div',null,
           React.createElement('p',{style:{fontWeight:500,fontSize:14,margin:"0 0 10px"}},"✅ Fortalezas"),
@@ -815,10 +912,10 @@ function App() {
           React.createElement('div',{style:{minWidth:30,height:30,borderRadius:"50%",background:NAVY,color:GOLD,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,flexShrink:0}},p.paso),
           React.createElement('div',{style:{flex:1}},
             React.createElement('div',{style:{display:"flex",justifyContent:"space-between"}},
-              React.createElement('p',{style:{fontWeight:500,fontSize:13,margin:"0 0 3px"}},p.titulo),
+              React.createElement('p',{style:{fontWeight:500,fontSize:13,margin:"0 0 3px"}},sanearAccion(sinPromesas(p.titulo))),
               React.createElement('span',{style:{fontSize:11,color:"#9ca3af",whiteSpace:"nowrap",marginLeft:8}},p.dias)
             ),
-            React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 6px",lineHeight:1.5}},sinPromesas(p.detalle)),
+            React.createElement('p',{style:{fontSize:12,color:"#6b7280",margin:"0 0 6px",lineHeight:1.5}},sanearAccion(sinPromesas(p.detalle))),
             p.servicio&&React.createElement('span',{style:{fontSize:11,background:"#eff6ff",color:"#2563eb",padding:"2px 10px",borderRadius:10}},p.servicio)
           )
         ))
