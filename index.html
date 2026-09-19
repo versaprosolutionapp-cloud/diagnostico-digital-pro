@@ -113,7 +113,7 @@ const DDP_ID = (() => {
     variantes_sugeridas: variantesNombre(intake.nombre, intake.ciudad, intake.brokerage),
     telefono_variantes: telVariantes(intake.telefono),
     encontrado: { nombres:[], telefonos:[], correos:[], dominios:[], handles:[], brokerage:[], direcciones:[], equipo:[] },
-    coincide: [], busquedas: []
+    coincide: [], busquedas: [], urls_vistas: []
   });
   const push = (arr, v, fuente) => { if(!v) return; const val=String(v).trim(); if(!val || arr.some(x=>x.v.toLowerCase()===val.toLowerCase())) return; arr.push({v:val, fuente:fuente||""}); };
   const enriquecerHuella = (h, d1) => {
@@ -125,6 +125,7 @@ const DDP_ID = (() => {
     if (d1.analisis_zillow?.nombre_perfil) push(enc.nombres, d1.analisis_zillow.nombre_perfil, "zillow");
     if (/^https?:|www\./i.test(d1.url_encontrada||"")) push(enc.dominios, d1.url_encontrada, "web");
     if (d1.brokerage) push(enc.brokerage, d1.brokerage, "resultados");
+    (d1.candidatos||[]).forEach(c => { if(c&&c.nombre_mostrado) push(enc.nombres, c.nombre_mostrado, c.plataforma||plataformaDeUrl(c.url)); if(c&&c.telefono) push(enc.telefonos, c.telefono, c.plataforma||""); if(c&&c.url&&(c.plataforma==="web"||plataformaDeUrl(c.url)==="web")) push(enc.dominios, c.url, "candidato"); });
     h.busquedas = Array.from(new Set([...(h.busquedas||[]), ...(d1.busquedas||[])]));
     // coincidencias entre lo suministrado y lo encontrado (nunca convierte suministrado en confirmado por sí solo)
     h.coincide = [];
@@ -132,15 +133,68 @@ const DDP_ID = (() => {
     if (h.suministrado.brokerage && enc.brokerage.some(b=>sinAcentos(b.v).toLowerCase().includes(sinAcentos(h.suministrado.brokerage).toLowerCase().split(" ")[0]))) h.coincide.push("brokerage");
     return h;
   };
+  // Plataformas: patrón de dominio, y si web_fetch puede leerlas (sin JavaScript) o no
+  const PLATAFORMAS = [
+    {k:"google", re:/(^|[./])google\.[a-z.]+\/maps|(^|[./])g\.co\/|maps\.app\.goo\.gl|business\.google/i, fetch:false},
+    {k:"zillow", re:/(^|[./])zillow\.com/i, fetch:true},
+    {k:"realtor_com", re:/(^|[./])realtor\.com/i, fetch:true},
+    {k:"homes", re:/(^|[./])homes\.com/i, fetch:true},
+    {k:"mapquest", re:/(^|[./])mapquest\.com/i, fetch:true},
+    {k:"yelp", re:/(^|[./])yelp\.com/i, fetch:true},
+    {k:"instagram", re:/(^|[./])instagram\.com/i, fetch:false},
+    {k:"facebook", re:/(^|[./])(facebook|fb)\.com/i, fetch:false},
+    {k:"tiktok", re:/(^|[./])tiktok\.com/i, fetch:false},
+    {k:"linkedin", re:/(^|[./])linkedin\.com/i, fetch:false},
+    {k:"linktree", re:/(^|[./])linktr\.ee|(^|[./])beacons\.ai/i, fetch:true},
+    {k:"youtube", re:/(^|[./])(youtube\.com|youtu\.be)/i, fetch:false},
+  ];
+  const DOMINIOS_GENERICOS = /(google\.|bing\.|yahoo\.|wikipedia\.|amazon\.|apple\.|microsoft\.)/i;
+  const hostDe = url => { try { return new URL(String(url)).hostname.replace(/^www\./,"").toLowerCase(); } catch(e) { return ""; } };
+  const plataformaDeUrl = url => { const u=String(url||""); const p=PLATAFORMAS.find(x=>x.re.test(u)); return p?p.k:(hostDe(u)?"web":""); };
+  const fetchable = url => { const u=String(url||""); const p=PLATAFORMAS.find(x=>x.re.test(u)); if(p) return p.fetch; return !!hostDe(u) && !DOMINIOS_GENERICOS.test(u); };
+  const tokensNombre = nombre => Array.from(new Set(sinAcentos(String(nombre||"")).toLowerCase().split(/[^a-z]+/).filter(t=>t.length>=4)));
+  // ¿La URL o el título contienen al menos dos partes del nombre (o una forma unida como "marialejandra")?
+  const urlCoincideNombre = (url, title, nombre) => {
+    const tk = tokensNombre(nombre); if(!tk.length) return false;
+    const txt = sinAcentos(String(url||"")+" "+String(title||"")).toLowerCase().replace(/[^a-z]+/g," ");
+    const flat = txt.replace(/\s+/g,"");
+    const hits = tk.filter(t=>flat.includes(t)).length;
+    const unido = tk.length>=2 && flat.includes(tk[0]+tk[1]);
+    return hits>=2 || unido;
+  };
+  // URLs vistas en resultados de búsqueda que parecen ser del cliente (no se evalúan: solo se conservan como pista)
+  const filtrarUrlsVistas = (resultados, nombre, previas) => {
+    const out = [...(previas||[])]; const seen = new Set(out.map(x=>x.url));
+    (resultados||[]).forEach(r => {
+      if(!r||!r.url||seen.has(r.url)) return;
+      const plat = plataformaDeUrl(r.url); if(!plat) return;
+      if(plat==="web" && DOMINIOS_GENERICOS.test(r.url)) return;
+      if(!urlCoincideNombre(r.url, r.title, nombre)) return;
+      seen.add(r.url); out.push({url:r.url, title:String(r.title||"").slice(0,80), plataforma:plat});
+    });
+    return out.slice(0,30);
+  };
+  const urlVistaPara = (plataforma, urls) => (urls||[]).find(u=>u.plataforma===plataforma) || null;
+  // Candidatos de R0: solo confianza alta/media y con al menos 2 señales entran a la lista de apertura
+  const DOMINIOS_FETCH_BASE = ["zillow.com","realtor.com","homes.com","yelp.com","mapquest.com","linktr.ee"];
+  const candidatosAbribles = cands => (cands||[]).filter(c => c && c.url && fetchable(c.url) && (c.confianza==="alta" || (c.confianza==="media" && (c.senales||[]).length>=2)));
+  const dominiosFetch = cands => Array.from(new Set([...DOMINIOS_FETCH_BASE, ...candidatosAbribles(cands).map(c=>hostDe(c.url)).filter(Boolean)]));
+  const candidatosTexto = (cands, urls) => {
+    const abr = candidatosAbribles(cands);
+    const lin = (cands||[]).map(c=>`- [${c.plataforma||plataformaDeUrl(c.url)}] ${c.url||"(sin url)"} | nombre mostrado: ${c.nombre_mostrado||"?"} | señales: ${(c.senales||[]).join(", ")||"ninguna"}${(c.diferencias||[]).length?" | diferencias: "+c.diferencias.join(", "):""} | confianza: ${c.confianza||"?"}${abr.includes(c)?" | ABRIBLE con web_fetch":""}`);
+    const vis = (urls||[]).slice(0,25).map(u=>`- [${u.plataforma}] ${u.url}${u.title?" — "+u.title:""}`);
+    return `CANDIDATOS_IDENTIFICADOS (paso 0):\n${lin.join("\n")||"- ninguno"}\nURLS_VISTAS_EN_RESULTADOS (no evaluadas; pueden ser del cliente o de un homónimo):\n${vis.join("\n")||"- ninguna"}`;
+  };
   const huellaTexto = h => JSON.stringify({
     SUMINISTRADO_POR_CONSULTOR: h.suministrado,
     VARIANTES_DE_NOMBRE_A_PROBAR: h.variantes_sugeridas,
     TELEFONO_FORMATOS_EQUIVALENTES: h.telefono_variantes,
     ENCONTRADO_EN_FUENTES_PUBLICAS: h.encontrado,
     COINCIDE_SUMINISTRADO_VS_PUBLICO: h.coincide,
-    VARIANTES_YA_PROBADAS: h.busquedas
+    VARIANTES_YA_PROBADAS: h.busquedas,
+    URLS_VISTAS: (h.urls_vistas||[]).map(u=>u.url)
   });
-  return { sinAcentos, normTel, mismoTel, fmtTel, telVariantes, variantesNombre, normSenal, esFuerte, ajustarEstado, nuevaHuella, enriquecerHuella, huellaTexto, FUERTES, COMPLEMENTARIAS };
+  return { PLATAFORMAS, hostDe, plataformaDeUrl, fetchable, urlCoincideNombre, filtrarUrlsVistas, urlVistaPara, candidatosAbribles, dominiosFetch, candidatosTexto, sinAcentos, normTel, mismoTel, fmtTel, telVariantes, variantesNombre, normSenal, esFuerte, ajustarEstado, nuevaHuella, enriquecerHuella, huellaTexto, FUERTES, COMPLEMENTARIAS };
 })();
 window.DDP_ID = DDP_ID;
 
@@ -154,7 +208,19 @@ IDENTIDAD: registra TODAS las formas del nombre que veas en las plataformas en i
 AFIRMACIONES: cifras (seguidores, ventas, reseñas, ratings, años, premios) solo si las viste; de lo contrario null o "por verificar". Nada de promesas de resultado: prohibido "#1", "número 1", "posicionarte como", "superar a", "garantizado".
 SIN COMPETENCIA: este diagnóstico evalúa y mejora la presencia digital del cliente auditado; NO busques, nombres ni evalúes competidores, referentes, rankings ni comparaciones con otros agentes o negocios. Toda búsqueda se dedica exclusivamente a resolver, verificar y auditar los activos digitales del cliente. Prohibido "competidores débiles", "mejor que", "por encima de", "líder de la zona".
 `;
-const SYSTEM_R1 = PROTOCOLO + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
+const APERTURA = `APERTURA SELECTIVA (web_fetch): si recibes CANDIDATOS_IDENTIFICADOS, parte de ellos en vez de buscar desde cero. Abre con web_fetch SOLO candidatos marcados ABRIBLE (confianza alta, o media con ≥2 señales), en este orden de prioridad: sitio propio → Zillow/Realtor.com → Linktree/Homes.com/Yelp. Máximo el número de aperturas permitido. NO intentes abrir Google Maps, Instagram, Facebook, LinkedIn ni TikTok (no se renderizan): confírmalos por enlace directo desde el sitio propio, por teléfono/correo visto en otra fuente, o déjalos en el estado prudente que corresponda. Al abrir una página extrae: teléfono, correo, brokerage, nombre mostrado, dirección, enlaces a redes; regístralos en huella_encontrada y en coincidencias/diferencias del activo. Copia en "fuente_url" la URL exacta que sustenta cada activo. Si una apertura falla, el activo queda REQUIERE_VERIFICACION con su URL vista.
+`;
+const SYSTEM_R0 = (tipo) => PROTOCOLO + `PASO 0 — RESOLUCIÓN DE IDENTIDAD (sin auditar nada todavía). Eres experto en presencia digital de ${tipo==="realtor"?"agentes de bienes raíces en Texas y Florida":"pequeños negocios en Texas"}.
+Objetivo único: localizar los perfiles y páginas que probablemente pertenecen a este ${tipo==="realtor"?"agente":"negocio"} y registrar sus señales. NO evalúes calidad, NO puntúes, NO propongas plan.
+Método: usa web_search con las VARIANTES_DE_NOMBRE_A_PROBAR y, si hay teléfono, con sus FORMATOS_EQUIVALENTES (entre comillas). Busca específicamente: sitio propio, ficha de Google Business/Maps, Zillow, Realtor.com, Homes.com, Yelp, Instagram, Facebook, LinkedIn, TikTok, Linktree. Cada activo hallado aporta claves (usuario, dominio, teléfono, brokerage, nombre de equipo) para buscar los demás: encadena.
+Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
+{"candidatos":[{"plataforma":"web|google|zillow|realtor_com|homes|yelp|mapquest|instagram|facebook|linkedin|tiktok|linktree|otro","url":"URL exacta vista en resultados","nombre_mostrado":"","telefono":"solo si lo viste","brokerage":"solo si lo viste","senales":["telefono","ciudad","actividad","nombre","brokerage","enlace","dominio","correo","equipo"],"diferencias":["nombre mostrado distinto","ciudad distinta"],"confianza":"alta|media|baja","evidencia":"fragmento breve de lo visto"}],
+"huella_encontrada":{"nombres":[{"v":"","fuente":""}],"telefonos":[{"v":"","fuente":""}],"correos":[],"dominios":[],"handles":[],"brokerage":[],"direcciones":[],"equipo":[]},
+"busquedas":["variantes de búsqueda usadas"],
+"nota":"1 oración: qué quedó sin localizar y por qué"}
+Reglas: confianza "alta" solo con una señal fuerte (teléfono, correo, dominio, enlace directo, brokerage+teléfono); "media" con ciudad + actividad + nombre parecido; "baja" con solo nombre. Incluye también homónimos dudosos como "baja" con sus diferencias: es mejor listar y descartar después que omitir. Nunca inventes URLs: solo las que aparecieron en resultados. SOLO JSON.`;
+
+const SYSTEM_R1 = PROTOCOLO + APERTURA + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
 Usa web_search para investigar el sitio web, Google Business Profile, Zillow y Realtor.com del AGENTE (no de la agencia/brokerage).
 Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
 Detalles máximo 10 palabras cada uno.
@@ -165,10 +231,10 @@ Detalles máximo 10 palabras cada uno.
 "cumplimiento":{"estado":"CONFIRMADO/REQUIERE_VERIFICACION/NO_LOCALIZADO","d":"evidencia o 'Información TREC/FREC-DBPR pendiente de verificación'"},
 "huella_encontrada":{"nombres":[{"v":"","fuente":""}],"telefonos":[{"v":"","fuente":""}],"correos":[],"dominios":[],"handles":[],"brokerage":[],"direcciones":[],"equipo":[]},
 "scores_web":0,"scores_gmaps":0,"scores_zillow":0,"scores_directorios":0,
-"analisis_web":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
-"analisis_gmaps":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
-"analisis_zillow":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"v":"Completo/Parcial/Por verificar","d":""}},
-"analisis_directorios":{"homes_com":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
+"analisis_web":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_zillow":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","perfil_reclamado":{"v":"Sí/No","d":""},"resenas":{"cantidad":0,"promedio":"0.0"},"ventas_pasadas":{"v":"Muestra/No muestra","d":""},"listings_activos":{"v":"Sí/No","d":""},"realtor_com":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"v":"Completo/Parcial/Por verificar","d":""}},
+"analisis_directorios":{"homes_com":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}},"mapquest":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""}},"yelp":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"completitud":{"v":"Completo/Parcial/Ausente","d":""},"resenas":{"cantidad":0,"promedio":"0.0"}}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_zillow":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
@@ -177,12 +243,12 @@ Detalles máximo 10 palabras cada uno.
 Reglas: scores 0-100 solo para activos CONFIRMADOS (null si no), status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 2 items cada categoría.
 La página web se evalúa por cumplimiento SOLO si está confirmada: Texas requiere aviso TREC (IABS/Consumer Protection Notice) y afiliación al broker visible; Florida requiere nombre del brokerage junto al contacto (61J2-10.025). Si no puedes verlo, "cumplimiento" queda REQUIERE_VERIFICACION con el texto de pendiente. SOLO JSON.`;
 
-const SYSTEM_R2 = PROTOCOLO + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
+const SYSTEM_R2 = PROTOCOLO + APERTURA + `Eres experto en marketing digital para agentes de bienes raíces (realtors) en Texas y Florida.
 Investiga WhatsApp Business, Instagram, Facebook y TikTok del agente (solo sus activos; nada de competidores ni referentes). Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
 Detalles máximo 10 palabras.
 
 {"scores_social":0,
-"social":[{"red":"WhatsApp Business","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"Con catálogo/Sin catálogo/Por verificar","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"Facebook","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"TikTok","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
+"social":[{"red":"WhatsApp Business","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"Con catálogo/Sin catálogo/Por verificar","frecuencia":"tiempo de respuesta ej: <1 hora","calidad":"Alta/Media/Baja","d":""},{"red":"Instagram","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"Facebook","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""},{"red":"TikTok","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "oportunidades":["o1","o2","o3"],
 "plan":[{"paso":1,"titulo":"","detalle":"","dias":"Días 1-3","servicio":""}],
@@ -191,7 +257,7 @@ Reglas: plan máximo 4 pasos, sin promesas de resultado; oportunidades y plan se
 servicio: "Diagnóstico + Kit Realtor"|"Página web para agente"|"Configuración WhatsApp Business"|"Setup Instagram/Facebook + bio"|"Plan de contenido mensual (redes)"|"Gestión de reseñas (1 mes)"|"Optimización Google Business + Zillow"|"Guía de video (grabación + edición)"|"Mantenimiento digital mensual"
 SOLO JSON.`;
 
-const SYSTEM_B1 = PROTOCOLO + `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+const SYSTEM_B1 = PROTOCOLO + APERTURA + `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
 Usa web_search para investigar el sitio web y Google Business Profile del negocio.
 Responde SOLO con JSON compacto y válido. Sin texto extra. Sin markdown. Sin backticks.
 Detalles máximo 10 palabras cada uno.
@@ -201,19 +267,19 @@ Detalles máximo 10 palabras cada uno.
 "identidad":{"nombres_encontrados":["forma 1"],"telefonos_encontrados":[],"nap_inconsistente":false,"d":""},
 "huella_encontrada":{"nombres":[],"telefonos":[],"correos":[],"dominios":[],"handles":[],"brokerage":[],"direcciones":[],"equipo":[]},
 "scores_web":0,"scores_gmaps":0,
-"analisis_web":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
-"analisis_gmaps":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
+"analisis_web":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"url":"","mensaje_principal":{"v":"Claro/Confuso/Ausente","d":""},"diseno":{"v":"Profesional/Regular/Deficiente","d":""},"velocidad":{"v":"Rápido/Medio/Lento","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"seo":{"v":"Bueno/Regular/Malo","d":""},"mobile":{"v":"Optimizado/Parcial/No optimizado","d":""},"kw":["kw1","kw2","kw3"]},
+"analisis_gmaps":{"estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":["telefono","ciudad"],"diferencias":["nombre mostrado"],"encontrado":true,"nombre_perfil":"","categorias":{"v":"Correctas/Incompletas/No definidas","d":""},"contacto":{"v":"Completo/Parcial/Ausente","d":""},"fotos":{"v":"Muchas/Pocas/Sin fotos","d":""},"resenas":{"cantidad":0,"promedio":"0.0","respondidas":"Sí/Parcial/No"},"descripcion":{"v":"Completa/Básica/Sin descripción","d":""},"publicaciones":{"v":"Activo/Inactivo/Sin publicaciones","d":""}},
 "items_web":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "items_gmaps":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "fortalezas":["f1","f2"]}
 Reglas: scores 0-100 solo para activos CONFIRMADOS (null si no), status: critico|mejorable|bien, tipo: debilidad|fortaleza, mínimo 3 items. SOLO JSON.`;
 
-const SYSTEM_B2 = PROTOCOLO + `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
+const SYSTEM_B2 = PROTOCOLO + APERTURA + `Eres experto en marketing digital y SEO local para pequeños negocios en Texas.
 Investiga las redes sociales del negocio (solo sus activos; nada de competidores ni referentes). Responde SOLO con JSON compacto. Sin markdown. Sin texto extra.
 Detalles máximo 10 palabras.
 
 {"scores_social":0,"scores_ads":0,
-"social":[{"red":"Instagram","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
+"social":[{"red":"Instagram","estado":"CONFIRMADO/COINCIDENCIA_PROBABLE/REQUIERE_VERIFICACION/NO_LOCALIZADO","evidencia":"","fuente_url":"","coincidencias":[],"diferencias":[],"handle":"","seguidores":"","frecuencia":"Diaria/Semanal/Mensual/Inactivo/Por verificar","calidad":"Alta/Media/Baja/Por verificar","d":""}],
 "items_social":[{"status":"critico","titulo":"","detalle":"","tipo":"debilidad"}],
 "oportunidades":["o1","o2","o3"],
 "ads":{"conviene":true,"tipo":"Google Ads/Local Services Ads/No recomendado","objetivo":"Llamadas/Formularios/Visitas","kw":["kw1","kw2"],"presupuesto":"$X-$Y/mes","errores":["e1","e2"]},
@@ -251,16 +317,20 @@ const extractJSON = (raw) => {
   }
 };
 
-const callAPI = async (system, userMsg) => {
+const callAPI = async (system, userMsg, opts) => {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system, userMsg }),
+    body: JSON.stringify({ system, userMsg, ...(opts||{}) }),
   });
-  const raw = await res.json();
+  const txt = await res.text();
+  let raw; try { raw = JSON.parse(txt); } catch(e) { throw new Error(`El servidor no respondió JSON (HTTP ${res.status}): ${txt.slice(0,120)}`); }
   if (raw.error) throw new Error(raw.error);
-  return extractJSON(raw);
+  const data = extractJSON(raw);
+  data._evidencia = raw._evidencia || null; // consultas, URLs vistas, aperturas y uso, conservados por el servidor
+  return data;
 };
+const UBICACION = { Texas:{type:"approximate",region:"Texas",country:"US",timezone:"America/Chicago"}, Florida:{type:"approximate",region:"Florida",country:"US",timezone:"America/New_York"} };
 
 function App() {
   const [step, setStep] = useState("intake");
@@ -271,6 +341,7 @@ function App() {
   const [ciudad, setCiudad] = useState("");
   const [telefono, setTelefono] = useState("");
   const [huella, setHuella] = useState(null);
+  const [r0, setR0] = useState(null);
   const [notas, setNotas] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
@@ -303,12 +374,30 @@ function App() {
     const base = isRealtor
       ? `Agente: ${agente.trim()}\nCiudad/zona: ${ciudad.trim()}\nEstado: ${estadoUbic}\nTeléfono suministrado por el consultor: ${telefono.trim()?DDP_ID.fmtTel(telefono)+" (formatos equivalentes: "+h.telefono_variantes.join(" | ")+")":"no suministrado"}\nNotas de campo (pistas, no verdades): ${notas||"Sin notas"}\nHUELLA_DE_IDENTIDAD: ${DDP_ID.huellaTexto(h)}`
       : `Negocio: ${negocio}\nNotas: ${notas||"Sin notas"}\nHUELLA_DE_IDENTIDAD: ${DDP_ID.huellaTexto(h)}`;
+    const ubic = { ...(UBICACION[estadoUbic]||UBICACION.Texas), ...(isRealtor && ciudad.trim() ? {city: ciudad.trim().split(/[,/]/)[0].trim()} : {}) };
+    const nombreRef = isRealtor ? agente : negocio;
+    const etiquetar = (obj, plat) => { if(obj && typeof obj==="object") obj._plataforma = plat; };
     try {
-      setLoadMsg(isRealtor ? "🔍 Analizando web, Google Business y Zillow..." : "🔍 Analizando web y Google Maps...");
-      const d1 = await callAPI(isRealtor ? SYSTEM_R1 : SYSTEM_B1, base);
+      // ---- Paso 0: identidad primero (solo búsqueda; sin auditoría) ----
+      setLoadMsg("🪪 Resolviendo identidad: buscando perfiles y páginas del cliente...");
+      const d0 = await callAPI(SYSTEM_R0(tipo), base, { paso:"R0", ubicacion: ubic });
+      setR0(d0);
+      const h0 = DDP_ID.enriquecerHuella(h, d0);
+      h0.urls_vistas = DDP_ID.filtrarUrlsVistas(d0._evidencia?.resultados, nombreRef, h0.urls_vistas);
+      (d0.candidatos||[]).forEach(c => { if(c&&c.url&&!h0.urls_vistas.some(u=>u.url===c.url)) h0.urls_vistas.push({url:c.url,title:c.nombre_mostrado||"",plataforma:c.plataforma||DDP_ID.plataformaDeUrl(c.url)}); });
+      setHuella({...h0});
+      const candTexto = DDP_ID.candidatosTexto(d0.candidatos, h0.urls_vistas);
+      const dominios = DDP_ID.dominiosFetch(d0.candidatos);
+      // ---- Paso 1: auditoría web + Google + Zillow, partiendo de los candidatos ----
+      setLoadMsg(isRealtor ? "🔍 Auditando web, Google Business y Zillow..." : "🔍 Auditando web y Google Maps...");
+      const d1 = await callAPI(isRealtor ? SYSTEM_R1 : SYSTEM_B1, `${base}\n${candTexto}\nHUELLA_DE_IDENTIDAD (paso 0 → paso 1): ${DDP_ID.huellaTexto(h0)}`, { paso:"R1", ubicacion: ubic, dominios });
+      etiquetar(d1.analisis_web,"web"); etiquetar(d1.analisis_gmaps,"google"); etiquetar(d1.analisis_zillow,"zillow"); etiquetar(d1.analisis_zillow?.realtor_com,"realtor_com");
+      etiquetar(d1.analisis_directorios?.homes_com,"homes"); etiquetar(d1.analisis_directorios?.mapquest,"mapquest"); etiquetar(d1.analisis_directorios?.yelp,"yelp");
       setB1(d1);
-      setLoadMsg(isRealtor ? "📱 Analizando redes y WhatsApp..." : "📱 Analizando redes sociales...");
-      const h2 = DDP_ID.enriquecerHuella(h, d1); setHuella({...h2});
+      setLoadMsg(isRealtor ? "📱 Auditando redes y WhatsApp..." : "📱 Auditando redes sociales...");
+      const h2 = DDP_ID.enriquecerHuella(h0, d1);
+      h2.urls_vistas = DDP_ID.filtrarUrlsVistas(d1._evidencia?.resultados, nombreRef, h2.urls_vistas);
+      setHuella({...h2});
       const claves = [
         `Nombre: ${d1.nombre}`, `Ciudad: ${d1.ciudad}`, `URL: ${d1.url_encontrada}`,
         d1.brokerage ? `Brokerage visto en resultados: ${d1.brokerage}` : "",
@@ -316,10 +405,13 @@ function App() {
         h2.encontrado.nombres.length ? `Formas del nombre ya vistas: ${h2.encontrado.nombres.map(x=>x.v).join(" | ")}` : "",
         h2.encontrado.telefonos.length ? `Teléfonos vistos en fuentes públicas: ${h2.encontrado.telefonos.map(x=>x.v+(x.fuente?" ("+x.fuente+")":"")).join(" | ")}` : "",
         h2.busquedas.length ? `Variantes ya probadas: ${h2.busquedas.join("; ")}` : "",
+        candTexto,
         `HUELLA_DE_IDENTIDAD (estructurada, paso 1 → paso 2): ${DDP_ID.huellaTexto(h2)}`,
       ].filter(Boolean).join("\n");
-      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa la huella completa (nombres vistos, teléfonos, dominios, handles, brokerage, equipo) como claves de búsqueda y de comparación antes de declarar cualquier red como no localizada; registra coincidencias y diferencias por activo.`);
+      const d2 = await callAPI(isRealtor ? SYSTEM_R2 : SYSTEM_B2, `${base}\n${claves}\nUsa la huella completa (nombres vistos, teléfonos, dominios, handles, brokerage, equipo) como claves de búsqueda y de comparación antes de declarar cualquier red como no localizada; registra coincidencias y diferencias por activo.`, { paso:"R2", ubicacion: ubic, dominios: DDP_ID.dominiosFetch(d0.candidatos) });
       delete d2.competidores; delete d2.referente_top; // módulo de competencia eliminado: se ignora aunque el modelo lo devuelva
+      (d2.social||[]).forEach(r => { const n=DDP_ID.sinAcentos(String(r.red||"")).toLowerCase(); etiquetar(r, /instagram/.test(n)?"instagram":/facebook/.test(n)?"facebook":/tiktok/.test(n)?"tiktok":/linkedin/.test(n)?"linkedin":/youtube/.test(n)?"youtube":""); });
+      const h3 = {...h2}; h3.urls_vistas = DDP_ID.filtrarUrlsVistas(d2._evidencia?.resultados, nombreRef, h2.urls_vistas); setHuella(h3);
       setB2(d2);
       setStep("report");
     } catch(e) { setError("Error: "+e.message); }
@@ -335,14 +427,18 @@ function App() {
   const estadoBruto = obj => { if(!obj) return "NO_LOCALIZADO"; const e=normEstado(obj.estado); if(e) return e; if(obj.encontrado===false) return "NO_LOCALIZADO"; if(obj.encontrado===true) return "CONFIRMADO"; return "REQUIERE_VERIFICACION"; };
   // Estado ajustado: el modelo propone, las señales registradas deciden (sin puntaje opaco)
   const resolver = obj => { const bruto=estadoBruto(obj); if(!obj) return {estado:bruto,fuertes:[],comp:[],motivo:""}; const tieneSenales=Array.isArray(obj.coincidencias)||Array.isArray(obj.diferencias); if(!tieneSenales) return {estado:bruto,fuertes:[],comp:[],motivo:"sin señales registradas (esquema anterior)"}; return DDP_ID.ajustarEstado(bruto, obj.coincidencias, obj.diferencias, {telefonoCoincide: telefonoCoincideEn(obj)}); };
-  const estadoDe = obj => resolver(obj).estado;
-  const Senales = ({obj}) => { if(!obj||(!obj.coincidencias&&!obj.diferencias)) return null; const r=resolver(obj); const co=(obj.coincidencias||[]), di=(obj.diferencias||[]); if(!co.length&&!di.length) return null;
+  const resolverBase = resolver;
+  const resolverConUrls = obj => { const r = resolverBase(obj); if(!obj||!obj._plataforma||!huella) return r; if(r.estado!=="NO_LOCALIZADO") return r; const u = DDP_ID.urlVistaPara(obj._plataforma, huella.urls_vistas); if(!u) return r; return {...r, estado:"REQUIERE_VERIFICACION", motivo:"el modelo no la incorporó, pero una URL de esta plataforma con el nombre del cliente apareció en los resultados", url_vista:u.url}; };
+  const estadoDe = obj => resolverConUrls(obj).estado;
+  const Senales = ({obj}) => { if(!obj) return null; const r=resolverConUrls(obj); const co=(obj.coincidencias||[]), di=(obj.diferencias||[]); if(!co.length&&!di.length&&!r.url_vista&&!obj.fuente_url) return null;
     return React.createElement('div',{style:{marginTop:8,padding:"8px 10px",background:"#f9fafb",borderRadius:8,fontSize:12,lineHeight:1.6}},
       co.map((c,i)=>React.createElement('div',{key:"c"+i,style:{color:"#16a34a"}},`✓ ${c}${DDP_ID.esFuerte(c)?" (señal fuerte)":""}`)),
       di.map((d,i)=>React.createElement('div',{key:"d"+i,style:{color:"#d97706"}},`⚠ ${d}`)),
       r.estado==="COINCIDENCIA_PROBABLE"&&React.createElement('div',{style:{color:"#2563eb",fontWeight:600}},"→ Confirmar identidad con el cliente"),
       r.motivo&&React.createElement('div',{style:{color:"#6b7280"}},`Ajuste: ${r.motivo}`),
-      obj.evidencia&&React.createElement('div',{style:{color:"#9ca3af"}},`Evidencia: ${obj.evidencia}`)
+      obj.evidencia&&React.createElement('div',{style:{color:"#9ca3af"}},`Evidencia: ${obj.evidencia}`),
+      obj.fuente_url&&React.createElement('div',{style:{color:"#9ca3af",wordBreak:"break-all"}},`Fuente: ${obj.fuente_url}`),
+      r.url_vista&&React.createElement('div',{style:{color:"#d97706",wordBreak:"break-all"}},`🔗 URL vista en resultados (por confirmar): ${r.url_vista}`)
     ); };
   const EstadoBadge = ({estado}) => { const e=EST[estado]||EST.REQUIERE_VERIFICACION; return React.createElement('span',{style:{fontSize:11,padding:"3px 10px",borderRadius:10,background:e.bg,color:e.c,fontWeight:500,whiteSpace:"nowrap"}},e.l); };
   const NO_LOC_NOTA = "No localizado durante la revisión inicial: no equivale a que no exista. Confirmar con el cliente (URL, usuario o teléfono) y repetir la búsqueda.";
@@ -441,7 +537,7 @@ function App() {
       React.createElement('label',{style:{fontSize:12,color:"#6b7280",display:"block",marginBottom:4,fontWeight:500}},"Notas de campo ",React.createElement('span',{style:{color:"#9ca3af"}},"(opcional)")),
       React.createElement('textarea',{value:notas,onChange:e=>setNotas(e.target.value),rows:3,placeholder:tipo==="realtor"?"Pistas (no verdades): Brokerage: Empire Network Realty; usa nombre de equipo; atiende en español...":"Ej: Local bien presentado, atienden en español, clientes por referidos...",style:{...inp,resize:"vertical"}}),
       React.createElement('div',{style:{marginTop:12,padding:"10px 14px",background:"#eff6ff",borderRadius:8,borderLeft:"3px solid #2563eb"}},
-        React.createElement('p',{style:{fontSize:12,color:"#2563eb",margin:0}},tipo==="realtor"?"💡 Análisis en 2 pasos: web + Google Business + Zillow, luego redes + WhatsApp.":"💡 Análisis en 2 pasos: web + Google Maps, luego redes sociales.")
+        React.createElement('p',{style:{fontSize:12,color:"#2563eb",margin:0}},tipo==="realtor"?"💡 Análisis en 3 pasos: identidad, luego web + Google Business + Zillow, luego redes + WhatsApp.":"💡 Análisis en 3 pasos: identidad, luego web + Google Maps, luego redes sociales.")
       ),
       error&&React.createElement('div',{style:{marginTop:10,padding:"10px 14px",background:"#fef2f2",borderRadius:8,border:"1px solid #fecaca"}},
         React.createElement('p',{style:{color:"#dc2626",fontSize:13,margin:0}},error)),
@@ -454,10 +550,10 @@ function App() {
           React.createElement('p',{style:{fontSize:13,color:"#6b7280",margin:0}},loadMsg)
         ),
         React.createElement('div',{style:{display:"flex",gap:8}},
-          (tipo==="realtor"?["🌐 Web + Google + Zillow","📱 Redes + WhatsApp"]:["🌐 Web + Google","📱 Redes sociales"]).map((l,i)=>
-            React.createElement('div',{key:i,style:{flex:1,padding:"6px 10px",borderRadius:6,background:i===0&&b1?"#f0fdf4":"#f3f4f6",textAlign:"center"}},
-              React.createElement('p',{style:{fontSize:11,margin:0,color:i===0&&b1?"#16a34a":"#9ca3af"}},(i===0&&b1?"✓ ":"")+l)
-            )
+          (tipo==="realtor"?["🪪 Identidad","🌐 Web + Google + Zillow","📱 Redes + WhatsApp"]:["🪪 Identidad","🌐 Web + Google","📱 Redes sociales"]).map((l,i)=>{ const done=(i===0&&r0)||(i===1&&b1); return (
+            React.createElement('div',{key:i,style:{flex:1,padding:"6px 10px",borderRadius:6,background:done?"#f0fdf4":"#f3f4f6",textAlign:"center"}},
+              React.createElement('p',{style:{fontSize:11,margin:0,color:done?"#16a34a":"#9ca3af"}},(done?"✓ ":"")+l)
+            )); }
           )
         )
       )
@@ -504,7 +600,7 @@ function App() {
         React.createElement('p',{style:{color:GOLD,fontWeight:700,fontSize:15,margin:0}},b1.nombre),
         React.createElement('p',{style:{color:"#8FA8C8",fontSize:12,margin:"2px 0 0"}},`${b1.tipo} · ${b1.ciudad} · preliminar: ${areasConfirmadas}/${areasTotal} áreas confirmadas${areasProbables?` · ${areasProbables} probable${areasProbables>1?"s":""}`:""}`)
       ),
-      React.createElement('button',{onClick:()=>{setStep("intake");setB1(null);setB2(null);setNegocio("");setAgente("");setCiudad("");setTelefono("");setNotas("");setHuella(null);},
+      React.createElement('button',{onClick:()=>{setStep("intake");setB1(null);setB2(null);setNegocio("");setAgente("");setCiudad("");setTelefono("");setNotas("");setHuella(null);setR0(null);},
         style:{background:"transparent",border:"1px solid #8FA8C8",color:"#8FA8C8",borderRadius:6,padding:"4px 12px",fontSize:12,cursor:"pointer"}},"Nuevo")
     ),
 
@@ -552,7 +648,11 @@ function App() {
           React.createElement('p',{style:{fontSize:12,color:"#374151",margin:"0 0 8px",lineHeight:1.5}},Object.entries(huella.encontrado).filter(([k,arr])=>arr.length).map(([k,arr])=>`${k}: `+arr.map(x=>x.v+(x.fuente?` (${x.fuente})`:"")).join(", ")).join(" · ")||"nada registrado aún"),
           React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},"Coincide suministrado ↔ público"),
           React.createElement('p',{style:{fontSize:12,color:huella.coincide.length?"#16a34a":"#6b7280",margin:0}},huella.coincide.length?huella.coincide.map(c=>"✓ "+c).join("  "):"sin coincidencias registradas todavía"),
-          huella.busquedas.length>0&&React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"8px 0 0"}},`Variantes probadas: ${huella.busquedas.join("; ")}`)
+          huella.busquedas.length>0&&React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"8px 0 0"}},`Variantes probadas: ${huella.busquedas.join("; ")}`),
+          (huella.urls_vistas||[]).length>0&&React.createElement('div',{style:{marginTop:8}},
+            React.createElement('p',{style:{fontSize:11,color:"#9ca3af",margin:"0 0 4px",textTransform:"uppercase"}},`URLs vistas en resultados (${huella.urls_vistas.length}; pistas, no confirmadas)`),
+            huella.urls_vistas.slice(0,8).map((u,i)=>React.createElement('p',{key:i,style:{fontSize:11,color:"#374151",margin:"0 0 2px",wordBreak:"break-all"}},`[${u.plataforma}] ${u.url}`))
+          )
         )),
         tipo==="realtor"&&card(React.createElement('div',null,
           React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
